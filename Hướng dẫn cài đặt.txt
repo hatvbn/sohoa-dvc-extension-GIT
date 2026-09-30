@@ -1,0 +1,38 @@
+﻿HƯỚNG DẪN CÀI ĐẶT — HaTools DVCBacNinh
+Công cụ số hóa / ký số / đính kèm / đồng bộ VBDLIS trên Cổng DVC Bắc Ninh
+
+============================================================
+A. CÀI TIỆN ÍCH VÀO CHROME (bắt buộc)
+============================================================
+1) Giải nén trọn bộ thư mục ra ổ cứng (không chạy trực tiếp trong file nén).
+2) Mở Chrome, gõ vào thanh địa chỉ:  chrome://extensions
+3) Bật "Chế độ dành cho nhà phát triển" (góc trên bên phải).
+4) Bấm "Tải tiện ích đã giải nén", chọn thư mục:  sohoa-dvc-extension
+   -> Xuất hiện tiện ích "HaTools DVCBacNinh".
+
+============================================================
+B. BẬT TỰ ĐỘNG BẤM "KÝ SỐ" (chỉ khi dùng ký số)
+============================================================
+5) Trong thư mục vừa giải nén, bấm đúp file:  Cài đặt tự bấm ký số.bat
+   - Nếu Windows hiện "Đã bảo vệ PC của bạn":
+     bấm "Thông tin thêm" -> "Vẫn chạy".
+   - Thấy dòng "DA CAI DAT XONG" là thành công.
+6) Quay lại chrome://extensions, bấm "Tải lại" trên "HaTools DVCBacNinh".
+
+============================================================
+C. TRƯỚC MỖI LẦN CHẠY
+============================================================
+7) Mở phần mềm ký số VGCA và cắm USB token (chỉ cần khi ký số).
+8) Đăng nhập Cổng DVC Bắc Ninh.
+9) Mở trang cần làm, bấm nút tròn ở góc dưới bên phải để hiện bảng
+   điều khiển, rồi bấm "Bắt đầu".
+   - Lần ký đầu tiên trong ngày: nhập mã PIN của USB token một lần.
+
+============================================================
+GỠ TỰ BẤM KÝ:  bấm đúp file  Gỡ cài đặt tự bấm ký số.bat
+============================================================
+LƯU Ý
+- Máy phải cài sẵn phần mềm ký số VGCA thì phần tự bấm ký mới chạy.
+  Thiếu nó, các chức năng số hóa / đính kèm / đồng bộ vẫn dùng bình thường.
+- Bấm ký mà cửa sổ ký không hiện: đóng hết cửa sổ ký cũ rồi tải lại trang.
+- Cần hỗ trợ: liên hệ Trần Văn Hà - 0925558885.

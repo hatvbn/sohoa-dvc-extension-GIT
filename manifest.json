@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "HaTools DVCBacNinh",
+  "version": "1.9.1",
+  "description": "Tự động số hóa (kèm ký số), đính kèm, trả kết quả và đồng bộ VBDLIS hàng loạt trên Cổng DVC Bắc Ninh.",
+  "author": "Trần Văn Hà - Văn phòng đăng ký đất đai Bắc Ninh - SĐT: 0925558885",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvLYwR/O4MBHo89WtZuuN9TLC5VVXrENK2h5YBknMrSI9p56geGUGu8s4iPpmZVOEFUrKYnwLfDAfZZ1BSHBZ3d+zKFlTAjytqiLldjxoPZT+J3kb7koOdx5dIogYdQz7js8AtFI0GeI0sMhFNPIc9r8ABHRxqX+K8pozzT0P7i7oa7xbBnsKQb9WtckBe1Gg0XU2OlA+KhUZo4dmD37+ttJZmjL6Zmrj2dMqAcNZijkBJmAkBIYjdXzg8t5SEiCU4ph3vQEwUEUGyGw0ELNnWdLYUspSz4q7XRsYtIpFkYXqp6itr2tUqZTItAfgp4u5twRrtuBrtA4kbrqZBDJMQQIDAQAB",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "storage",
+    "tabs",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "HaTools DVCBacNinh — mở bảng điều khiển",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://dichvucong.bacninh.gov.vn/web/guest/so-hoa-cho-boc-tach*",
+        "https://dichvucong.bacninh.gov.vn/web/guest/%C4%90%C3%ADnh-k%C3%A8m-%C4%91i%E1%BB%87n-t%E1%BB%AD*",
+        "https://dichvucong.bacninh.gov.vn/web/guest/h%E1%BB%93-s%C6%A1-vbdlis*",
+        "https://dichvucong.bacninh.gov.vn/web/guest/h%E1%BB%93-s%C6%A1-ch%E1%BB%9D-tr%E1%BA%A3-k%E1%BA%BFt-qu%E1%BA%A3*",
+        "https://dichvucong.bacninh.gov.vn/web/guest/cho-bo-sung-ket-qua-dien-tu*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "panel.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

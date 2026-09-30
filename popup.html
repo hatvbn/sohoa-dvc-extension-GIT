@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<style>
+  body {
+    margin: 0;
+    width: 280px;
+    background: #1e2233;
+    color: #e8eaf2;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  .pp-header {
+    background: #4f46e5;
+    color: #fff;
+    padding: 12px 14px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .pp-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .pp-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    background: #2b2f47;
+    color: #e8eaf2;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pp-btn:hover {
+    background: #363b5c;
+  }
+  .pp-btn .pp-icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    color: #a5b4fc;
+  }
+  .pp-status {
+    font-size: 12px;
+    color: #93c5fd;
+    min-height: 16px;
+  }
+  .pp-footer {
+    border-top: 1px solid #2b2f47;
+    padding: 10px 14px 12px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #8b8fb0;
+  }
+  .pp-footer .pp-name {
+    color: #b6bad0;
+    font-weight: 600;
+  }
+  .pp-footer a {
+    color: #a5b4fc;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+  <div class="pp-header">HaTools DVCBacNinh</div>
+  <div class="pp-body">
+    <button class="pp-btn" id="pp-sohoa">
+      <svg class="pp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+      <span>Số hóa hàng loạt</span>
+    </button>
+    <button class="pp-btn" id="pp-dinhkem">
+      <svg class="pp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05 12.2 20.25a5.5 5.5 0 0 1-7.78-7.78l9.2-9.2a3.67 3.67 0 0 1 5.19 5.19l-9.2 9.19a1.83 1.83 0 0 1-2.6-2.59l8.5-8.49"/></svg>
+      <span>Đính kèm điện tử hàng loạt</span>
+    </button>
+    <button class="pp-btn" id="pp-bosung">
+      <svg class="pp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>
+      <span>Bổ sung kết quả điện tử hàng loạt</span>
+    </button>
+    <button class="pp-btn" id="pp-vbdlis">
+      <svg class="pp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+      <span>Đồng bộ hồ sơ VBDLIS</span>
+    </button>
+    <button class="pp-btn" id="pp-trakq">
+      <svg class="pp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <span>Trả kết quả hàng loạt</span>
+    </button>
+    <div class="pp-status" id="pp-status"></div>
+  </div>
+  <div class="pp-footer">
+    <div class="pp-name">Trần Văn Hà</div>
+    <div>Văn phòng đăng ký đất đai Bắc Ninh</div>
+    <div>SĐT: <a href="https://zalo.me/84925558885" target="_blank" rel="noopener" title="Nhắn Zalo">0925558885</a></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

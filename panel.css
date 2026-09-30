@@ -1,0 +1,229 @@
+#sohoa-dvc-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 360px;
+  max-height: 70vh;
+  background: #1e2233;
+  border: 1px solid #3a3f5c;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  z-index: 2147483647;
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 13px;
+  color: #e8eaf2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#sohoa-dvc-panel .sh-header {
+  background: #4f46e5;
+  color: #fff;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: move;
+  font-weight: 600;
+}
+
+#sohoa-dvc-panel .sh-header .sh-close {
+  cursor: pointer;
+  opacity: 0.85;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+#sohoa-dvc-panel .sh-header .sh-close:hover {
+  opacity: 1;
+}
+
+#sohoa-dvc-panel .sh-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+#sohoa-dvc-panel .sh-summary {
+  color: #b6bad0;
+}
+
+#sohoa-dvc-panel .sh-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#sohoa-dvc-panel button {
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#sohoa-dvc-panel .sh-start {
+  background: #4f46e5;
+  color: #fff;
+  flex: 1;
+}
+#sohoa-dvc-panel .sh-start:disabled {
+  background: #3a3860;
+  color: #8b8fb0;
+  cursor: not-allowed;
+}
+
+#sohoa-dvc-panel .sh-stop {
+  background: #e11d48;
+  color: #fff;
+  flex: 1;
+}
+#sohoa-dvc-panel .sh-stop:disabled {
+  background: #5c2333;
+  color: #b08c94;
+  cursor: not-allowed;
+}
+
+#sohoa-dvc-panel .sh-progress-wrap {
+  background: #2b2f47;
+  border-radius: 6px;
+  height: 8px;
+  overflow: hidden;
+}
+#sohoa-dvc-panel .sh-progress-bar {
+  background: #4f46e5;
+  height: 100%;
+  width: 0%;
+  transition: width 0.2s ease;
+}
+
+#sohoa-dvc-panel .sh-log {
+  border-top: 1px solid #333854;
+  padding-top: 8px;
+  overflow-y: auto;
+  max-height: 260px;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+#sohoa-dvc-panel .sh-log-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 2px 0;
+  border-bottom: 1px dashed #2b2f47;
+}
+#sohoa-dvc-panel .sh-log-line.ok { color: #34d399; }
+#sohoa-dvc-panel .sh-log-line.err { color: #fb7185; }
+#sohoa-dvc-panel .sh-log-line.info { color: #93c5fd; }
+/* Bỏ qua (skip) và cảnh báo (warn): vàng/hổ phách - phân biệt rõ với lỗi thật (đỏ). */
+#sohoa-dvc-panel .sh-log-line.skip { color: #fbbf24; }
+#sohoa-dvc-panel .sh-log-line.warn { color: #fbbf24; }
+
+#sohoa-dvc-fab {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483646;
+  background: #4f46e5;
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  padding: 12px 18px;
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.45);
+  cursor: pointer;
+}
+
+#sohoa-dvc-fab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#sohoa-dvc-fab .sh-fab-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+#sohoa-dvc-panel .sh-opts {
+  display: flex;
+  align-items: center;
+  color: #b6bad0;
+  font-size: 12px;
+}
+#sohoa-dvc-panel .sh-opts label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#sohoa-dvc-panel .sh-opts input.sh-delay {
+  width: 64px;
+  background: #2b2f47;
+  border: 1px solid #3a3f5c;
+  border-radius: 5px;
+  color: #e8eaf2;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+#sohoa-dvc-panel .sh-opts input.sh-delay:disabled {
+  opacity: 0.5;
+}
+
+#sohoa-dvc-panel .sh-opts {
+  gap: 14px;
+  flex-wrap: wrap;
+}
+#sohoa-dvc-panel .sh-opts label.sh-sign {
+  gap: 5px;
+  cursor: pointer;
+}
+#sohoa-dvc-panel .sh-opts label.sh-sign input {
+  cursor: pointer;
+}
+
+#sohoa-dvc-panel .sh-who {
+  padding: 6px 12px;
+  background: #262a3f;
+  border-bottom: 1px solid #333854;
+  color: #b6bad0;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#sohoa-dvc-panel .sh-who[hidden] {
+  display: none;
+}
+
+#sohoa-dvc-panel .sh-update {
+  display: block;
+  padding: 8px 12px;
+  background: #3a2f0b;
+  color: #fcd34d;
+  border-bottom: 1px solid #5a4a12;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+#sohoa-dvc-panel .sh-update:hover { background: #4a3c10; }
+#sohoa-dvc-panel .sh-update[hidden] { display: none; }
+
+#sohoa-dvc-panel .sh-thongbao {
+  padding: 8px 12px;
+  background: #0e2f3a;
+  color: #7fe3ff;
+  border-bottom: 1px solid #14506a;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#sohoa-dvc-panel .sh-thongbao[hidden] { display: none; }

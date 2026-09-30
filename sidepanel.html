@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  /* Thuộc tính hidden phải luôn thắng display trong CSS (nếu không .sp-current/.sp-update
+     có display cố định sẽ không ẩn được -> khối task cũ chồng lên thông báo). */
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: #1e2233;
+    color: #e8eaf2;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  .sp-header {
+    background: #4f46e5;
+    color: #fff;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .sp-header .sp-ver { font-size: 11px; font-weight: 400; opacity: 0.85; }
+  .sp-who { padding: 6px 14px; font-size: 11px; color: #b6bad0; border-bottom: 1px solid #2b2f47; }
+  .sp-thongbao {
+    padding: 8px 14px; font-size: 12px; background: #3a2f10; color: #fbbf24;
+    border-bottom: 1px solid #2b2f47;
+  }
+  .sp-update {
+    display: block; padding: 8px 14px; font-size: 12px; background: #10281c; color: #34d399;
+    text-decoration: none; border-bottom: 1px solid #2b2f47;
+  }
+  .sp-update:hover { background: #14311f; }
+  .sp-tasks { padding: 10px 14px 4px; display: flex; flex-direction: column; gap: 6px; }
+  .sp-tasks-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #8b8fb0; margin-bottom: 2px; }
+  .sp-task {
+    border: none; border-radius: 8px; padding: 9px 12px; font-size: 12.5px; font-weight: 600;
+    cursor: pointer; background: #2b2f47; color: #e8eaf2; text-align: left;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .sp-task:hover { background: #363b5c; }
+  .sp-task.active { background: #4f46e5; color: #fff; }
+  .sp-task .sp-ic { width: 17px; height: 17px; flex: 0 0 auto; color: #a5b4fc; }
+  .sp-task.active .sp-ic { color: #fff; }
+
+  .sp-current {
+    margin: 8px 14px; padding: 12px; background: #232741; border: 1px solid #2b2f47; border-radius: 10px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .sp-current-title { font-weight: 700; font-size: 13.5px; }
+  /* Ẩn dòng mô tả/ghi chú của task theo yêu cầu (giữ phần tử để không phải sửa JS). */
+  .sp-hint { display: none; font-size: 11.5px; color: #93c5fd; line-height: 1.45; }
+  .sp-opts { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+  .sp-opts label { display: flex; align-items: center; gap: 8px; }
+  .sp-opts input[type="number"] { width: 64px; background: #1a1e2e; color: #e8eaf2; border: 1px solid #3a3f5c; border-radius: 6px; padding: 4px 6px; }
+  .sp-progress-wrap { height: 6px; background: #1a1e2e; border-radius: 4px; overflow: hidden; }
+  .sp-progress-bar { height: 100%; width: 0; background: #4f46e5; transition: width .2s; }
+  .sp-summary { font-size: 12px; color: #cdd0e5; min-height: 16px; }
+  .sp-actions { display: flex; gap: 8px; }
+  .sp-btn { flex: 1; border: none; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .sp-start { background: #22c55e; color: #06240f; }
+  .sp-start:disabled { background: #2b3a30; color: #6b8f76; cursor: default; }
+  .sp-stop { background: #ef4444; color: #2a0b0b; }
+  .sp-stop:disabled { background: #3a2b2b; color: #8f6b6b; cursor: default; }
+
+  .sp-none { margin: 8px 14px; padding: 12px; font-size: 12.5px; color: #cdd0e5; background: #232741; border: 1px dashed #3a3f5c; border-radius: 10px; line-height: 1.5; }
+
+  .sp-log-wrap { flex: 1; margin: 0 14px 8px; display: flex; flex-direction: column; min-height: 80px; }
+  .sp-log { flex: 1; overflow-y: auto; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11.5px; line-height: 1.5; background: #14182a; border: 1px solid #2b2f47; border-radius: 8px; padding: 8px; }
+  .sp-log-line { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+  .sp-log-line.ok { color: #34d399; }
+  .sp-log-line.err { color: #fb7185; }
+  .sp-log-line.info { color: #93c5fd; }
+  .sp-log-line.skip, .sp-log-line.warn { color: #fbbf24; }
+
+  .sp-footer { border-top: 1px solid #2b2f47; padding: 8px 14px; font-size: 11px; line-height: 1.5; color: #8b8fb0; }
+  .sp-footer .sp-name { color: #b6bad0; font-weight: 600; }
+  .sp-footer a { color: #a5b4fc; text-decoration: none; }
+</style>
+</head>
+<body>
+  <div class="sp-header"><span>HaTools DVCBacNinh</span><span class="sp-ver" id="sp-ver"></span></div>
+  <div class="sp-who" id="sp-who" hidden></div>
+  <div class="sp-thongbao" id="sp-thongbao" hidden></div>
+  <a class="sp-update" id="sp-update" hidden target="_blank" rel="noopener"></a>
+
+  <div class="sp-tasks">
+    <div class="sp-tasks-title">Chức năng — bấm để mở trang</div>
+    <button class="sp-task" data-key="sohoa">
+      <svg class="sp-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+      <span>Số hóa hàng loạt</span>
+    </button>
+    <button class="sp-task" data-key="dinhkem">
+      <svg class="sp-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05 12.2 20.25a5.5 5.5 0 0 1-7.78-7.78l9.2-9.2a3.67 3.67 0 0 1 5.19 5.19l-9.2 9.19a1.83 1.83 0 0 1-2.6-2.59l8.5-8.49"/></svg>
+      <span>Đính kèm điện tử hàng loạt</span>
+    </button>
+    <button class="sp-task" data-key="bosung">
+      <svg class="sp-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>
+      <span>Bổ sung kết quả điện tử hàng loạt</span>
+    </button>
+    <button class="sp-task" data-key="vbdlis">
+      <svg class="sp-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+      <span>Đồng bộ hồ sơ VBDLIS</span>
+    </button>
+    <button class="sp-task" data-key="trakq">
+      <svg class="sp-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <span>Trả kết quả hàng loạt</span>
+    </button>
+  </div>
+
+  <div class="sp-none" id="sp-none">Mở một chức năng ở trên. Khi trang chức năng đã mở, phần điều khiển sẽ hiện ở đây.</div>
+
+  <div class="sp-current" id="sp-current" hidden>
+    <div class="sp-current-title" id="sp-title"></div>
+    <div class="sp-hint" id="sp-hint"></div>
+    <div class="sp-opts">
+      <label id="sp-sign-wrap" hidden><input type="checkbox" id="sp-sign" checked /> Ký số giấy tờ</label>
+      <label>Nghỉ giữa hồ sơ
+        <input type="number" id="sp-delay" min="0.3" max="30" step="0.1" value="1.2" /> giây
+      </label>
+    </div>
+    <div class="sp-progress-wrap"><div class="sp-progress-bar" id="sp-bar"></div></div>
+    <div class="sp-summary" id="sp-summary"></div>
+    <div class="sp-actions">
+      <button class="sp-btn sp-start" id="sp-start">▶ Bắt đầu</button>
+      <button class="sp-btn sp-stop" id="sp-stop" disabled>⏹ Dừng</button>
+    </div>
+  </div>
+
+  <div class="sp-log-wrap"><div class="sp-log" id="sp-log"></div></div>
+
+  <div class="sp-footer">
+    <div class="sp-name">Trần Văn Hà</div>
+    <div>Văn phòng đăng ký đất đai Bắc Ninh</div>
+    <div>SĐT: <a href="https://zalo.me/84925558885" target="_blank" rel="noopener" title="Nhắn Zalo">0925558885</a></div>
+  </div>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
