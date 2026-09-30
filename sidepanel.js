@@ -133,10 +133,8 @@ function showNone(msg) {
 }
 
 // ----- chức năng Tải File Số Hóa -------------------------------------------
-let dlUnitsKey = '';
-
 function setDlRunning(running) {
-  ['sp-dl-unit', 'sp-dl-name', 'sp-dl-from', 'sp-dl-to', 'sp-dl-start'].forEach((id) => {
+  ['sp-dl-name', 'sp-dl-start'].forEach((id) => {
     el(id).disabled = running;
   });
   el('sp-dl-stop').disabled = !running;
@@ -149,26 +147,6 @@ function renderDownload(resp) {
   noneEl.hidden = true;
   currentEl.hidden = true;
   dlEl.hidden = false;
-  // Chỉ dựng lại danh sách đơn vị khi thay đổi, để không mất lựa chọn của người dùng.
-  const units = resp.units || [];
-  const key = units.map((u) => u.value).join(',');
-  if (key !== dlUnitsKey) {
-    dlUnitsKey = key;
-    const sel = el('sp-dl-unit');
-    const keep = sel.value;
-    sel.innerHTML = '';
-    const all = document.createElement('option');
-    all.value = '-1';
-    all.textContent = '-- Tất cả đơn vị --';
-    sel.appendChild(all);
-    units.forEach((u) => {
-      const o = document.createElement('option');
-      o.value = u.value;
-      o.textContent = (u.depth ? '\u00a0\u00a0– ' : '') + u.label;
-      sel.appendChild(o);
-    });
-    if (Array.from(sel.options).some((o) => o.value === keep)) sel.value = keep;
-  }
   logEl.innerHTML = '';
   (resp.logs || []).forEach(addLogLine);
   const st = resp.state || {};
@@ -217,10 +195,7 @@ el('sp-dl-start').addEventListener('click', async () => {
   const res = await sendToTab(activeTabId, {
     ns: 'sp',
     cmd: 'dl-start',
-    unit: el('sp-dl-unit').value,
     name: el('sp-dl-name').value,
-    from: el('sp-dl-from').value,
-    to: el('sp-dl-to').value,
   });
   if (res && res.ok) {
     logEl.innerHTML = '';

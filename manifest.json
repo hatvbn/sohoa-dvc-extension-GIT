@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HaTools DVCBacNinh",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "description": "Tự động số hóa (kèm ký số), đính kèm, trả kết quả, đồng bộ VBDLIS hàng loạt và tải file số hóa trên Cổng DVC Bắc Ninh.",
   "author": "Trần Văn Hà - Văn phòng đăng ký đất đai Bắc Ninh - SĐT: 0925558885",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvLYwR/O4MBHo89WtZuuN9TLC5VVXrENK2h5YBknMrSI9p56geGUGu8s4iPpmZVOEFUrKYnwLfDAfZZ1BSHBZ3d+zKFlTAjytqiLldjxoPZT+J3kb7koOdx5dIogYdQz7js8AtFI0GeI0sMhFNPIc9r8ABHRxqX+K8pozzT0P7i7oa7xbBnsKQb9WtckBe1Gg0XU2OlA+KhUZo4dmD37+ttJZmjL6Zmrj2dMqAcNZijkBJmAkBIYjdXzg8t5SEiCU4ph3vQEwUEUGyGw0ELNnWdLYUspSz4q7XRsYtIpFkYXqp6itr2tUqZTItAfgp4u5twRrtuBrtA4kbrqZBDJMQQIDAQAB",
