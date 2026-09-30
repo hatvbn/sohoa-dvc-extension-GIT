@@ -10,7 +10,8 @@
   // Các ô lọc của trang (tên tham số = tiền tố portlet + tên này). Giá trị được gửi NGUYÊN VĂN,
   // nên đúng định dạng ngày của trang, không phải đoán.
   const FILTER_FIELDS = ['srsoDinhDanh', 'srchuHoSo', 'srmaHoSo', 'srmaFile', 'srdonViHanhChinhId', 'srtuNgay', 'srdenNgay'];
-  const PAGE_SIZE = 20; // server trả tối đa 20 dòng/trang (đã kiểm chứng delta=20)
+  const PAGE_SIZE = 200; // số bản ghi/trang khi quét, như các chức năng khác (tối đa 200)
+  const FALLBACK_PAGE_SIZE = 20; // giá trị máy chủ đã được kiểm chứng chấp nhận, dùng khi 200 bị từ chối
   const MAX_PAGES = 1000;
   const CONCURRENCY = 3;
   const DEFAULT_DELAY_MS = 200;
@@ -226,20 +227,31 @@
     return new DOMParser().parseFromString(html, 'text/html');
   }
 
-  async function searchPage(ctx, filters, cur) {
-    const params = { mvcRenderCommandName: 'daSoHoa', cmd: 'SEARCH', cur: String(cur), delta: String(PAGE_SIZE) };
+  async function searchPage(ctx, filters, cur, size) {
+    const params = { mvcRenderCommandName: 'daSoHoa', cmd: 'SEARCH', cur: String(cur), delta: String(size) };
     FILTER_FIELDS.forEach((n) => {
       params[n] = filters[n] || '';
     });
     return parseRows(await fetchDoc(buildUrl(ctx, params)), location.href);
   }
 
-  // Quét toàn bộ các trang kết quả của bộ lọc hiện tại trên trang.
+  // Quét toàn bộ các trang kết quả của bộ lọc hiện tại trên trang, mỗi trang tối đa 200 bản ghi.
+  // Không suy ra "hết dữ liệu" từ việc trang ngắn hơn 200 (máy chủ có thể giới hạn thấp hơn và
+  // sẽ bỏ sót hồ sơ): chỉ dừng khi gặp trang trống hoặc trang không có dòng mới.
   async function collectRows(ctx, filters) {
     const rows = [];
     const seen = new Set();
+    let size = PAGE_SIZE;
     for (let cur = 1; cur <= MAX_PAGES && !STATE.stop; cur++) {
-      const page = await searchPage(ctx, filters, cur);
+      let page;
+      try {
+        page = await searchPage(ctx, filters, cur, size);
+      } catch (e) {
+        if (cur !== 1 || size === FALLBACK_PAGE_SIZE) throw e;
+        log(`Máy chủ không nhận ${size} bản ghi/trang (${e && e.message}) — dùng ${FALLBACK_PAGE_SIZE} bản ghi/trang.`, 'warn');
+        size = FALLBACK_PAGE_SIZE;
+        page = await searchPage(ctx, filters, cur, size);
+      }
       if (!page.length) break;
       let fresh = 0;
       page.forEach((r) => {
@@ -251,7 +263,7 @@
         }
       });
       progress({ phase: 'search', text: `Đang tìm hồ sơ... đã quét ${rows.length} dòng (trang ${cur})`, pct: 0 });
-      if (!fresh || page.length < PAGE_SIZE) break;
+      if (!fresh) break;
     }
     return rows;
   }
