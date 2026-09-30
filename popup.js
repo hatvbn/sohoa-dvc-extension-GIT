@@ -7,6 +7,8 @@ const URL_VBDLIS = 'https://dichvucong.bacninh.gov.vn/web/guest/h%E1%BB%93-s%C6%
 
 const URL_TRAKQ = 'https://dichvucong.bacninh.gov.vn/web/guest/h%E1%BB%93-s%C6%A1-ch%E1%BB%9D-tr%E1%BA%A3-k%E1%BA%BFt-qu%E1%BA%A3';
 
+const URL_TAISOHOA = 'https://dichvucong.bacninh.gov.vn/web/guest/h%E1%BB%93-s%C6%A1-%C4%91%C3%A3-s%E1%BB%91-h%C3%B3a';
+
 const statusEl = document.getElementById('pp-status');
 
 function goTo(url) {
@@ -28,3 +30,4 @@ document.getElementById('pp-dinhkem').addEventListener('click', () => goTo(URL_D
 document.getElementById('pp-bosung').addEventListener('click', () => goTo(URL_BOSUNG));
 document.getElementById('pp-vbdlis').addEventListener('click', () => goTo(URL_VBDLIS));
 document.getElementById('pp-trakq').addEventListener('click', () => goTo(URL_TRAKQ));
+document.getElementById('pp-taisohoa').addEventListener('click', () => goTo(URL_TAISOHOA));

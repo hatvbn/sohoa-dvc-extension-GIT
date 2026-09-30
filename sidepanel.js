@@ -7,12 +7,14 @@ const URLS = {
   bosung: 'https://dichvucong.bacninh.gov.vn/web/guest/cho-bo-sung-ket-qua-dien-tu',
   vbdlis: 'https://dichvucong.bacninh.gov.vn/web/guest/h%E1%BB%93-s%C6%A1-vbdlis',
   trakq: 'https://dichvucong.bacninh.gov.vn/web/guest/h%E1%BB%93-s%C6%A1-ch%E1%BB%9D-tr%E1%BA%A3-k%E1%BA%BFt-qu%E1%BA%A3',
+  taisohoa: 'https://dichvucong.bacninh.gov.vn/web/guest/h%E1%BB%93-s%C6%A1-%C4%91%C3%A3-s%E1%BB%91-h%C3%B3a',
 };
 
 const el = (id) => document.getElementById(id);
 const logEl = el('sp-log');
 const currentEl = el('sp-current');
 const noneEl = el('sp-none');
+const dlEl = el('sp-dl');
 
 let activeTabId = null;
 
@@ -36,6 +38,7 @@ function sendToTab(tabId, msg) {
 }
 function taskKeyFromUrl(url) {
   const u = decodeURIComponent(url || '').toLowerCase();
+  if (u.includes('đã-số-hóa')) return 'taisohoa';
   if (u.includes('so-hoa-cho-boc-tach')) return 'sohoa';
   if (u.includes('cho-bo-sung-ket-qua-dien-tu')) return 'bosung';
   if (u.includes('chờ-trả-kết-quả') || u.includes('ch%e1%bb%9d-tr%e1%ba%a3')) return 'trakq';
@@ -85,6 +88,10 @@ async function refresh(retries) {
     el('sp-who').textContent = resp.who;
     el('sp-who').hidden = false;
   }
+  if (resp && resp.custom === 'taisohoa') {
+    renderDownload(resp);
+    return;
+  }
   if (resp && resp.hasTask) {
     renderTask(resp);
     return;
@@ -104,6 +111,7 @@ async function refresh(retries) {
 }
 
 function renderTask(resp) {
+  dlEl.hidden = true;
   noneEl.hidden = true;
   currentEl.hidden = false;
   el('sp-title').textContent = resp.taskTitle || '';
@@ -119,8 +127,54 @@ function renderTask(resp) {
 
 function showNone(msg) {
   currentEl.hidden = true;
+  dlEl.hidden = true;
   noneEl.hidden = false;
   noneEl.textContent = msg;
+}
+
+// ----- chức năng Tải File Số Hóa -------------------------------------------
+let dlUnitsKey = '';
+
+function setDlRunning(running) {
+  ['sp-dl-unit', 'sp-dl-name', 'sp-dl-from', 'sp-dl-to', 'sp-dl-start'].forEach((id) => {
+    el(id).disabled = running;
+  });
+  el('sp-dl-stop').disabled = !running;
+}
+function setDlProgress(p) {
+  el('sp-dl-bar').style.width = (p.pct || 0) + '%';
+  el('sp-dl-summary').textContent = p.text || '';
+}
+function renderDownload(resp) {
+  noneEl.hidden = true;
+  currentEl.hidden = true;
+  dlEl.hidden = false;
+  // Chỉ dựng lại danh sách đơn vị khi thay đổi, để không mất lựa chọn của người dùng.
+  const units = resp.units || [];
+  const key = units.map((u) => u.value).join(',');
+  if (key !== dlUnitsKey) {
+    dlUnitsKey = key;
+    const sel = el('sp-dl-unit');
+    const keep = sel.value;
+    sel.innerHTML = '';
+    const all = document.createElement('option');
+    all.value = '-1';
+    all.textContent = '-- Tất cả đơn vị --';
+    sel.appendChild(all);
+    units.forEach((u) => {
+      const o = document.createElement('option');
+      o.value = u.value;
+      o.textContent = (u.depth ? '\u00a0\u00a0– ' : '') + u.label;
+      sel.appendChild(o);
+    });
+    if (Array.from(sel.options).some((o) => o.value === keep)) sel.value = keep;
+  }
+  logEl.innerHTML = '';
+  (resp.logs || []).forEach(addLogLine);
+  const st = resp.state || {};
+  setDlRunning(!!st.running);
+  setDlProgress(st);
+  if (!resp.ready) el('sp-dl-summary').textContent = 'Chưa thấy bảng hồ sơ trên trang — hãy tải lại trang.';
 }
 
 // ----- sự kiện UI ----------------------------------------------------------
@@ -158,6 +212,30 @@ el('sp-stop').addEventListener('click', async () => {
   el('sp-stop').disabled = true;
 });
 
+el('sp-dl-start').addEventListener('click', async () => {
+  if (activeTabId == null) return;
+  const res = await sendToTab(activeTabId, {
+    ns: 'sp',
+    cmd: 'dl-start',
+    unit: el('sp-dl-unit').value,
+    name: el('sp-dl-name').value,
+    from: el('sp-dl-from').value,
+    to: el('sp-dl-to').value,
+  });
+  if (res && res.ok) {
+    logEl.innerHTML = '';
+    setDlRunning(true);
+  } else {
+    const msg = (res && res.error) || 'Không kết nối được với trang. Hãy tải lại trang rồi thử lại.';
+    addLogLine({ t: new Date().toLocaleTimeString('vi-VN'), msg: '✗ ' + msg, level: 'err' });
+  }
+});
+el('sp-dl-stop').addEventListener('click', async () => {
+  if (activeTabId == null) return;
+  await sendToTab(activeTabId, { ns: 'sp', cmd: 'dl-stop' });
+  el('sp-dl-stop').disabled = true;
+});
+
 // ----- sự kiện từ content script (log/tiến độ) -----------------------------
 chrome.runtime.onMessage.addListener((m, sender) => {
   if (!m || m.ns !== 'sp-evt') return;
@@ -166,6 +244,8 @@ chrome.runtime.onMessage.addListener((m, sender) => {
   else if (m.kind === 'clear') logEl.innerHTML = '';
   else if (m.kind === 'progress') setProgress(m.ok, m.skip, m.err, m.pct);
   else if (m.kind === 'running') setRunningUI(!!m.running);
+  else if (m.kind === 'dl-progress') setDlProgress(m.prog || {});
+  else if (m.kind === 'dl-running') setDlRunning(!!m.running);
   else if (m.kind === 'ready') refresh(); // content script vừa dò xong task -> làm mới UI
 });
 
