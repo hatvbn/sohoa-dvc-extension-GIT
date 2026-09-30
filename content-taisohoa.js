@@ -1,11 +1,15 @@
-// Chức năng "Tải File Số Hóa": tìm hồ sơ đã số hóa theo đơn vị / tên file / khoảng ngày rồi
-// tải toàn bộ file PDF gộp vào ZIP. Chạy trên trang "Hồ sơ đã số hóa", dùng phiên đăng nhập
-// sẵn có của người dùng (fetch cùng origin). Điều khiển từ side panel qua ns 'sp'.
+// Chức năng "Tải File Số Hóa": lấy đúng bộ lọc người dùng đã chọn ngay trên trang "Hồ sơ đã số
+// hóa" (đơn vị, từ ngày, đến ngày...), lọc thêm theo tên file nhập ở side panel rồi tải toàn bộ
+// file PDF gộp vào ZIP. Dùng phiên đăng nhập sẵn có (fetch cùng origin). Điều khiển từ side
+// panel qua ns 'sp'.
 (function () {
   'use strict';
 
   const TABLE_SUFFIX = 'tblSoHoa';
   const UNIT_SELECT_SUFFIX = 'srdonViHanhChinhId';
+  // Các ô lọc của trang (tên tham số = tiền tố portlet + tên này). Giá trị được gửi NGUYÊN VĂN,
+  // nên đúng định dạng ngày của trang, không phải đoán.
+  const FILTER_FIELDS = ['srsoDinhDanh', 'srchuHoSo', 'srmaHoSo', 'srmaFile', 'srdonViHanhChinhId', 'srtuNgay', 'srdenNgay'];
   const PAGE_SIZE = 20; // server trả tối đa 20 dòng/trang (đã kiểm chứng delta=20)
   const MAX_PAGES = 1000;
   const CONCURRENCY = 3;
@@ -15,7 +19,7 @@
   const LOG_MAX = 500;
   const MIN_CELLS = 20;
   // Chỉ số cột trong bảng (theo tiêu đề thực tế của trang).
-  const COL = { soDinhDanh: 1, chuHoSo: 2, maHoSo: 3, maFile: 4, giayTo: 5, ngayYeuCau: 19 };
+  const COL = { soDinhDanh: 1, chuHoSo: 2, maHoSo: 3, maFile: 4, giayTo: 5 };
   const VIEWER_RE = /\/file\/-\/dvc\/download\/|dvcfiles|\.pdf(\?|$)/i;
 
   const STATE = {
@@ -39,29 +43,6 @@
     const t = fold(term).trim();
     if (!t) return true;
     return fold(row.giayTo + ' ' + row.maFile).includes(t);
-  }
-
-  // "15/01/2026" hoặc "15/01/2026 14:30:23" -> Date (00:00 giờ địa phương) hoặc null.
-  function parseDmy(str) {
-    const m = String(str || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (!m) return null;
-    const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  // 'yyyy-MM-dd' (input type=date) -> Date hoặc null.
-  function parseIso(str) {
-    const m = String(str || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return null;
-    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  function formatDate(iso, fmt) {
-    if (!iso) return '';
-    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return '';
-    return fmt === 'iso' ? iso : m[3] + '/' + m[2] + '/' + m[1];
   }
 
   function sanitizeName(name, max) {
@@ -142,7 +123,6 @@
         maHoSo: cellText(cells[COL.maHoSo]),
         maFile,
         giayTo: cellText(cells[COL.giayTo], true),
-        ngayYeuCau: cellText(cells[COL.ngayYeuCau]),
       });
     });
     return rows;
@@ -167,14 +147,6 @@
       return { url: new URL('/file/-/dvc/download/' + idInput.value, baseHref).href, name: '' };
     }
     return null;
-  }
-
-  function outOfRange(rows, from, to) {
-    return rows.some((r) => {
-      const d = parseDmy(r.ngayYeuCau);
-      if (!d) return false;
-      return (from && d < from) || (to && d > to);
-    });
   }
 
   // ---- phát sự kiện tới side panel -------------------------------------------
@@ -223,14 +195,27 @@
     return location.origin + location.pathname + '?' + q.toString();
   }
 
-  function listUnits(ctx) {
-    if (!ctx || !ctx.select) return [];
-    return Array.from(ctx.select.options)
-      .filter((o) => o.value && o.value !== '-1')
-      .map((o) => {
-        const label = o.textContent.replace(/\s+/g, ' ').trim();
-        return { value: o.value, label: label.replace(/^-+\s*/, ''), depth: /^-/.test(label) ? 1 : 0 };
-      });
+  // Đọc bộ lọc hiện tại trên trang (đơn vị, ngày, mã...). Ô không tồn tại coi như để trống.
+  function readFilters(ctx) {
+    const f = {};
+    FILTER_FIELDS.forEach((name) => {
+      const el = document.getElementById(ctx.ns + name);
+      f[name] = el && typeof el.value === 'string' ? el.value.trim() : '';
+    });
+    if (!f.srdonViHanhChinhId) f.srdonViHanhChinhId = '-1';
+    const sel = document.getElementById(ctx.ns + UNIT_SELECT_SUFFIX);
+    const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+    f.unitLabel =
+      opt && f.srdonViHanhChinhId !== '-1' ? opt.textContent.replace(/\s+/g, ' ').trim().replace(/^-+\s*/, '') : '';
+    return f;
+  }
+
+  function hasAnyFilter(filters, term) {
+    return !!(
+      String(term || '').trim() ||
+      filters.srdonViHanhChinhId !== '-1' ||
+      FILTER_FIELDS.some((n) => n !== 'srdonViHanhChinhId' && filters[n])
+    );
   }
 
   // ---- mạng -------------------------------------------------------------------
@@ -241,41 +226,21 @@
     return new DOMParser().parseFromString(html, 'text/html');
   }
 
-  async function searchPage(ctx, opts, cur, fmt) {
-    const doc = await fetchDoc(
-      buildUrl(ctx, {
-        mvcRenderCommandName: 'daSoHoa',
-        cmd: 'SEARCH',
-        srsoDinhDanh: '',
-        srchuHoSo: '',
-        srmaHoSo: '',
-        srmaFile: '',
-        srdonViHanhChinhId: opts.unit || '-1',
-        srtuNgay: formatDate(opts.from, fmt),
-        srdenNgay: formatDate(opts.to, fmt),
-        cur: String(cur),
-        delta: String(PAGE_SIZE),
-      })
-    );
-    return parseRows(doc, location.href);
+  async function searchPage(ctx, filters, cur) {
+    const params = { mvcRenderCommandName: 'daSoHoa', cmd: 'SEARCH', cur: String(cur), delta: String(PAGE_SIZE) };
+    FILTER_FIELDS.forEach((n) => {
+      params[n] = filters[n] || '';
+    });
+    return parseRows(await fetchDoc(buildUrl(ctx, params)), location.href);
   }
 
-  // Quét các trang kết quả với một định dạng ngày. bad=true nếu gặp hồ sơ có "Ngày yêu cầu"
-  // ngoài khoảng đã chọn (dấu hiệu máy chủ không hiểu định dạng ngày). stopOnBad: dừng sớm.
-  async function collectRows(ctx, opts, fmt, stopOnBad) {
-    const from = parseIso(opts.from);
-    const to = parseIso(opts.to);
+  // Quét toàn bộ các trang kết quả của bộ lọc hiện tại trên trang.
+  async function collectRows(ctx, filters) {
     const rows = [];
     const seen = new Set();
-    let bad = false;
-
     for (let cur = 1; cur <= MAX_PAGES && !STATE.stop; cur++) {
-      const page = await searchPage(ctx, opts, cur, fmt);
+      const page = await searchPage(ctx, filters, cur);
       if (!page.length) break;
-      if ((from || to) && outOfRange(page, from, to)) {
-        bad = true;
-        if (stopOnBad) break;
-      }
       let fresh = 0;
       page.forEach((r) => {
         const key = r.id || r.maHoSo + '|' + r.maFile;
@@ -288,25 +253,7 @@
       progress({ phase: 'search', text: `Đang tìm hồ sơ... đã quét ${rows.length} dòng (trang ${cur})`, pct: 0 });
       if (!fresh || page.length < PAGE_SIZE) break;
     }
-    return { rows, bad };
-  }
-
-  // Thử dd/MM/yyyy trước; nếu kết quả lệch khoảng ngày thì thử yyyy-MM-dd; nếu cả hai đều
-  // lệch thì cảnh báo và dùng dd/MM/yyyy (máy chủ có thể lọc theo mốc thời gian khác).
-  async function collectWithDateFormat(ctx, opts) {
-    const first = await collectRows(ctx, opts, 'dmy', true);
-    if (!first.bad) return first.rows;
-    log('Kết quả lệch khoảng ngày với định dạng dd/MM/yyyy — thử định dạng yyyy-MM-dd...', 'warn');
-    const second = await collectRows(ctx, opts, 'iso', true);
-    if (!second.bad) {
-      log('Máy chủ dùng định dạng ngày yyyy-MM-dd.', 'warn');
-      return second.rows;
-    }
-    log(
-      'Cảnh báo: có hồ sơ có "Ngày yêu cầu" nằm ngoài khoảng ngày đã chọn ở cả hai định dạng — kiểm tra lại bộ lọc ngày (có thể máy chủ lọc theo mốc thời gian khác).',
-      'warn'
-    );
-    return (await collectRows(ctx, opts, 'dmy', false)).rows;
+    return rows;
   }
 
   async function resolveFile(row, ctx) {
@@ -365,14 +312,12 @@
   }
 
   // ---- luồng chính ----------------------------------------------------------
-  function validate(opts, ctx) {
+  function validate(filters, term, ctx) {
     if (!ctx) return 'Không tìm thấy bảng hồ sơ đã số hóa trên trang này.';
-    const from = parseIso(opts.from);
-    const to = parseIso(opts.to);
-    if (opts.from && !from) return 'Ngày bắt đầu không hợp lệ.';
-    if (opts.to && !to) return 'Ngày kết thúc không hợp lệ.';
-    if (from && to && from > to) return '"Từ ngày" phải nhỏ hơn hoặc bằng "Đến ngày".';
-    if (opts.unit && !/^-?\d+$/.test(String(opts.unit))) return 'Đơn vị không hợp lệ.';
+    if (!/^-?\d+$/.test(filters.srdonViHanhChinhId)) return 'Đơn vị đang chọn trên trang không hợp lệ.';
+    if (!hasAnyFilter(filters, term)) {
+      return 'Hãy chọn đơn vị/khoảng ngày trên trang (hoặc nhập tên file) trước khi tải, để tránh tải toàn bộ dữ liệu.';
+    }
     return '';
   }
 
@@ -387,11 +332,14 @@
 
     try {
       const term = String(opts.name || '').trim();
+      const f = opts.filters;
       log(
-        `Bắt đầu: đơn vị=${opts.unit && opts.unit !== '-1' ? opts.unit : 'tất cả'}, tên file="${term || '(tất cả)'}", ` +
-          `từ ${opts.from || '—'} đến ${opts.to || '—'}.`
+        `Bộ lọc trên trang: đơn vị="${f.unitLabel || 'tất cả'}", từ ${f.srtuNgay || '—'} đến ${f.srdenNgay || '—'}` +
+          `${f.srmaFile ? ', mã file=' + f.srmaFile : ''}${f.srmaHoSo ? ', mã hồ sơ=' + f.srmaHoSo : ''}` +
+          `${f.srsoDinhDanh ? ', số định danh=' + f.srsoDinhDanh : ''}${f.srchuHoSo ? ', chủ hồ sơ=' + f.srchuHoSo : ''}; ` +
+          `tên file="${term || '(tất cả)'}".`
       );
-      const all = await collectWithDateFormat(ctx, opts);
+      const all = await collectRows(ctx, f);
       const rows = all.filter((r) => matchName(r, term));
       log(`Tìm thấy ${all.length} dòng, khớp tên file: ${rows.length}.`, rows.length ? 'ok' : 'warn');
       if (!rows.length) return;
@@ -439,7 +387,7 @@
         log('Không có file nào tải được để đóng gói.', 'err');
         return;
       }
-      const tag = (opts.from || 'all').replace(/-/g, '') + '_' + (opts.to || 'all').replace(/-/g, '');
+      const tag = new Date().toISOString().replace(/[-:]/g, '').replace('T', '_').slice(0, 15);
       for (let p = 0; p < zips.length; p++) {
         const name = `TaiFileSoHoa_${tag}${zips.length > 1 ? '_p' + (p + 1) : ''}.zip`;
         saveBlob(zips[p].finish(), name);
@@ -460,16 +408,11 @@
   function start(msg) {
     if (STATE.running) return { ok: false, error: 'Đang chạy, hãy dừng hoặc chờ hoàn tất.' };
     const ctx = getContext();
-    const opts = {
-      unit: String(msg.unit || '-1'),
-      name: String(msg.name || ''),
-      from: String(msg.from || ''),
-      to: String(msg.to || ''),
-      delaySec: msg.delaySec,
-    };
-    const problem = validate(opts, ctx);
+    const term = String(msg.name || '');
+    const filters = ctx ? readFilters(ctx) : null;
+    const problem = validate(filters, term, ctx);
     if (problem) return { ok: false, error: problem };
-    run(opts, ctx);
+    run({ filters, name: term, delaySec: msg.delaySec }, ctx);
     return { ok: true };
   }
 
@@ -479,7 +422,6 @@
       custom: 'taisohoa',
       taskTitle: 'Tải File Số Hóa',
       ready: !!ctx,
-      units: listUnits(ctx),
       state: Object.assign({ running: STATE.running }, STATE.prog),
       logs: STATE.logs,
     };
@@ -501,8 +443,8 @@
   // Xuất hàm thuần để kiểm thử bằng Node (không ảnh hưởng khi chạy trong trình duyệt).
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-      fold, matchName, parseDmy, parseIso, formatDate, sanitizeName, fileNameFromUrl,
-      uniqueName, buildEntryName, parseRows, findFileUrl, outOfRange, buildUrl, getContext, listUnits, validate,
+      fold, matchName, sanitizeName, fileNameFromUrl, uniqueName, buildEntryName, parseRows,
+      findFileUrl, buildUrl, getContext, readFilters, hasAnyFilter, validate,
     };
   }
 })();
