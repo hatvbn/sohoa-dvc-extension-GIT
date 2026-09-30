@@ -98,6 +98,14 @@
     }
   }
 
+  // Quy tắc đặt tên: "Chủ hồ sơ Mã định danh.<đuôi gốc>", nằm trong thư mục theo mã hồ sơ.
+  // Thiếu cả chủ hồ sơ lẫn số định danh thì dùng mã file để không bị trùng/trống tên.
+  function buildEntryName(row, srcName) {
+    const ext = (String(srcName || '').match(/\.[A-Za-z0-9]{1,6}$/) || ['.pdf'])[0];
+    const base = [row.chuHoSo, row.soDinhDanh].filter(Boolean).join(' ') || row.maFile;
+    return `${sanitizeName(row.maHoSo, 80)}/${sanitizeName(base, 120)}${ext}`;
+  }
+
   function cellText(cell, dropBadges) {
     if (!cell) return '';
     const c = cell.cloneNode(true);
@@ -406,8 +414,7 @@
           try {
             const f = await resolveFile(row, ctx);
             const bytes = await downloadBytes(f.url);
-            const fname = sanitizeName(f.name || row.maFile + '.pdf');
-            const path = uniqueName(used, `${sanitizeName(row.maHoSo, 80)}/${sanitizeName(row.maFile, 80)} - ${fname}`);
+            const path = uniqueName(used, buildEntryName(row, f.name));
             zip.add(path, bytes);
             ok++;
             log(`✓ ${label} (${Math.round(bytes.length / 1024)} KB)`, 'ok');
@@ -495,7 +502,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       fold, matchName, parseDmy, parseIso, formatDate, sanitizeName, fileNameFromUrl,
-      uniqueName, parseRows, findFileUrl, outOfRange, buildUrl, getContext, listUnits, validate,
+      uniqueName, buildEntryName, parseRows, findFileUrl, outOfRange, buildUrl, getContext, listUnits, validate,
     };
   }
 })();
