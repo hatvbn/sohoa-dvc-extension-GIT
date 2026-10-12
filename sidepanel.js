@@ -134,7 +134,7 @@ function showNone(msg) {
 
 // ----- chức năng Tải File Số Hóa -------------------------------------------
 function setDlRunning(running) {
-  ['sp-dl-name', 'sp-dl-resume', 'sp-dl-start'].forEach((id) => {
+  ['sp-dl-name', 'sp-dl-resume', 'sp-dl-start', 'sp-dl-pickdir'].forEach((id) => {
     el(id).disabled = running;
   });
   el('sp-dl-stop').disabled = !running;
@@ -143,10 +143,30 @@ function setDlProgress(p) {
   el('sp-dl-bar').style.width = (p.pct || 0) + '%';
   el('sp-dl-summary').textContent = p.text || '';
 }
+function renderDir(d) {
+  const box = el('sp-dl-dir');
+  if (!d || d.supported === false) {
+    box.className = 'sp-dir warn';
+    box.textContent = 'Trình duyệt không hỗ trợ chọn thư mục — file sẽ lưu thành ZIP vào thư mục Downloads.';
+    return;
+  }
+  if (d.state === 'none') {
+    box.className = 'sp-dir';
+    box.textContent = 'Chưa chọn thư mục: file sẽ lưu thành ZIP vào thư mục Downloads của Chrome.';
+  } else if (d.state === 'granted') {
+    box.className = 'sp-dir ok';
+    box.textContent = `Lưu trực tiếp vào thư mục: «${d.name}» (từng file PDF, không nén ZIP).`;
+  } else {
+    box.className = 'sp-dir warn';
+    box.textContent = `Thư mục «${d.name}» cần cấp lại quyền ghi — bấm nút 📁 màu cam ở góc dưới bên phải trang.`;
+  }
+  if (d.note) box.textContent += ' ' + d.note;
+}
 function renderDownload(resp) {
   noneEl.hidden = true;
   currentEl.hidden = true;
   dlEl.hidden = false;
+  renderDir(resp.dir);
   logEl.innerHTML = '';
   (resp.logs || []).forEach(addLogLine);
   const st = resp.state || {};
@@ -206,6 +226,18 @@ el('sp-dl-start').addEventListener('click', async () => {
     addLogLine({ t: new Date().toLocaleTimeString('vi-VN'), msg: '✗ ' + msg, level: 'err' });
   }
 });
+el('sp-dl-pickdir').addEventListener('click', async () => {
+  if (activeTabId == null) return;
+  // Chrome chỉ mở hộp thoại chọn thư mục khi bấm ngay trên trang, nên nhắc người dùng bấm nút trên trang.
+  const res = await sendToTab(activeTabId, { ns: 'sp', cmd: 'dir-focus' });
+  addLogLine({
+    t: new Date().toLocaleTimeString('vi-VN'),
+    msg: res && res.ok
+      ? '📁 Hãy bấm nút «Chọn thư mục lưu file» đang nhấp nháy ở góc dưới bên phải trang để chọn thư mục.'
+      : '✗ Không thấy nút chọn thư mục trên trang — hãy tải lại trang (F5) rồi thử lại.',
+    level: res && res.ok ? 'info' : 'err',
+  });
+});
 el('sp-dl-stop').addEventListener('click', async () => {
   if (activeTabId == null) return;
   await sendToTab(activeTabId, { ns: 'sp', cmd: 'dl-stop' });
@@ -222,6 +254,7 @@ chrome.runtime.onMessage.addListener((m, sender) => {
   else if (m.kind === 'running') setRunningUI(!!m.running);
   else if (m.kind === 'dl-progress') setDlProgress(m.prog || {});
   else if (m.kind === 'dl-running') setDlRunning(!!m.running);
+  else if (m.kind === 'dl-dir') renderDir(m.dir);
   else if (m.kind === 'ready') refresh(); // content script vừa dò xong task -> làm mới UI
 });
 
