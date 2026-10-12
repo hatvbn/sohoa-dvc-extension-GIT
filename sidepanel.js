@@ -134,7 +134,7 @@ function showNone(msg) {
 
 // ----- chức năng Tải File Số Hóa -------------------------------------------
 function setDlRunning(running) {
-  ['sp-dl-name', 'sp-dl-start'].forEach((id) => {
+  ['sp-dl-name', 'sp-dl-resume', 'sp-dl-start'].forEach((id) => {
     el(id).disabled = running;
   });
   el('sp-dl-stop').disabled = !running;
@@ -196,6 +196,7 @@ el('sp-dl-start').addEventListener('click', async () => {
     ns: 'sp',
     cmd: 'dl-start',
     name: el('sp-dl-name').value,
+    resume: el('sp-dl-resume').checked,
   });
   if (res && res.ok) {
     logEl.innerHTML = '';

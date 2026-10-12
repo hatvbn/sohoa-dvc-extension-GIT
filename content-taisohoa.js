@@ -15,8 +15,21 @@
   const MAX_PAGES = 1000;
   const CONCURRENCY = 3;
   const DEFAULT_DELAY_MS = 200;
-  const MAX_PART_BYTES = 1000 * 1024 * 1024; // tách ZIP khi vượt ~1 GB (không dùng ZIP64)
-  const MAX_PART_FILES = 5000;
+  const STORE_KEY = 'hatools_taisohoa_done_v1'; // tiến độ để "tiếp tục từ lần trước"
+  const STORE_MAX_RUNS = 20;
+  const RETRIES = 3;
+  const MAX_PAUSES_PER_JOB = 2;
+  // Có thể chỉnh khi kiểm thử. partBytes/partFiles: lưu ZIP thành từng phần ngay khi đủ, để mất
+  // trang (hết phiên, chuyển hướng) cũng không mất toàn bộ phần đã tải (cũng không dùng ZIP64).
+  const CFG = {
+    partBytes: 200 * 1024 * 1024,
+    partFiles: 150,
+    retryBaseMs: 1500,
+    sessionPollMs: 10000,
+    keepAliveMs: 60000,
+  };
+  // URL điển hình của trang đăng nhập / SSO (dùng để nhận ra bị đẩy ra khỏi phiên).
+  const LOGIN_URL_RE = /\/c\/portal\/login|\/login(\/|$|\?)|dang-nhap|đăng-nhập|\/(sso|oauth2?|openid|auth)(\/|$|\?)/i;
   const LOG_MAX = 500;
   const MIN_CELLS = 20;
   // Chỉ số cột trong bảng (theo tiêu đề thực tế của trang).
@@ -28,7 +41,19 @@
     stop: false,
     logs: [],
     prog: { phase: '', text: '', pct: 0, ok: 0, err: 0, total: 0 },
+    sessionWait: null, // Promise khi đang tạm dừng chờ đăng nhập lại
+    lastGoodUrl: '', // URL file đã tải thành công gần nhất, dùng để thăm dò phiên
   };
+
+  class SessionError extends Error {}
+  // Máy chủ trả trang web thay vì file: có thể do phiên hỏng hoặc file lỗi riêng -> thử lại rồi thăm dò phiên.
+  class HtmlError extends Error {}
+  class HttpError extends Error {
+    constructor(status) {
+      super('HTTP ' + status);
+      this.status = status;
+    }
+  }
 
   // ---- tiện ích thuần (kiểm thử được) --------------------------------------
   function fold(s) {
@@ -86,6 +111,28 @@
     const ext = (String(srcName || '').match(/\.[A-Za-z0-9]{1,6}$/) || ['.pdf'])[0];
     const base = [row.chuHoSo, row.soDinhDanh].filter(Boolean).join(' ') || row.maFile;
     return `${sanitizeName(row.maHoSo, 80)}/${sanitizeName(base, 120)}${ext}`;
+  }
+
+  function isLoginUrl(u) {
+    try {
+      const x = new URL(u);
+      return LOGIN_URL_RE.test(decodeURIComponent(x.pathname) + x.search);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isLoginHtml(html) {
+    return /<input[^>]+type=["']?password/i.test(String(html || ''));
+  }
+
+  function rowKey(r) {
+    return r.id || r.maHoSo + '|' + r.maFile;
+  }
+
+  // Khóa nhận diện "cùng một việc": cùng bộ lọc trên trang + cùng tên file.
+  function runKey(filters, term) {
+    return JSON.stringify([FILTER_FIELDS.map((n) => filters[n] || ''), fold(term).trim()]);
   }
 
   function cellText(cell, dropBadges) {
@@ -222,8 +269,11 @@
   // ---- mạng -------------------------------------------------------------------
   async function fetchDoc(url) {
     const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (res.status === 401 || res.status === 403) throw new SessionError('HTTP ' + res.status);
+    if (res.redirected && isLoginUrl(res.url)) throw new SessionError('bị chuyển tới trang đăng nhập');
+    if (!res.ok) throw new HttpError(res.status);
     const html = await res.text();
+    if (isLoginHtml(html)) throw new SessionError('máy chủ trả màn hình đăng nhập');
     return new DOMParser().parseFromString(html, 'text/html');
   }
 
@@ -232,7 +282,11 @@
     FILTER_FIELDS.forEach((n) => {
       params[n] = filters[n] || '';
     });
-    return parseRows(await fetchDoc(buildUrl(ctx, params)), location.href);
+    const doc = await fetchDoc(buildUrl(ctx, params));
+    if (!doc.querySelector('table')) {
+      log('Phản hồi không có bảng kết quả (không có hồ sơ nào, hoặc phiên đã hết hạn).', 'warn');
+    }
+    return parseRows(doc, location.href);
   }
 
   // Quét toàn bộ các trang kết quả của bộ lọc hiện tại trên trang, mỗi trang tối đa 200 bản ghi.
@@ -245,17 +299,17 @@
     for (let cur = 1; cur <= MAX_PAGES && !STATE.stop; cur++) {
       let page;
       try {
-        page = await searchPage(ctx, filters, cur, size);
+        page = await guarded(() => withRetry(() => searchPage(ctx, filters, cur, size)), ctx, filters);
       } catch (e) {
-        if (cur !== 1 || size === FALLBACK_PAGE_SIZE) throw e;
+        if (cur !== 1 || size === FALLBACK_PAGE_SIZE || e instanceof SessionError) throw e;
         log(`Máy chủ không nhận ${size} bản ghi/trang (${e && e.message}) — dùng ${FALLBACK_PAGE_SIZE} bản ghi/trang.`, 'warn');
         size = FALLBACK_PAGE_SIZE;
-        page = await searchPage(ctx, filters, cur, size);
+        page = await guarded(() => withRetry(() => searchPage(ctx, filters, cur, size)), ctx, filters);
       }
       if (!page.length) break;
       let fresh = 0;
       page.forEach((r) => {
-        const key = r.id || r.maHoSo + '|' + r.maFile;
+        const key = rowKey(r);
         if (!seen.has(key)) {
           seen.add(key);
           rows.push(r);
@@ -284,6 +338,7 @@
         if (f) return f;
         lastErr = new Error('không thấy đường dẫn file trong trang chi tiết');
       } catch (e) {
+        if (e instanceof SessionError) throw e;
         lastErr = e;
       }
     }
@@ -292,10 +347,17 @@
 
   async function downloadBytes(url) {
     const res = await fetch(url, { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (res.status === 401 || res.status === 403) throw new SessionError('HTTP ' + res.status);
+    if (res.redirected && isLoginUrl(res.url)) throw new SessionError('bị chuyển tới trang đăng nhập');
+    if (!res.ok) throw new HttpError(res.status);
     const type = (res.headers.get('content-type') || '').toLowerCase();
-    if (type.includes('text/html')) throw new Error('máy chủ trả trang web thay vì file (phiên đăng nhập hết hạn?)');
-    return new Uint8Array(await res.arrayBuffer());
+    if (type.includes('text/html')) {
+      if (isLoginHtml(await res.text())) throw new SessionError('máy chủ trả màn hình đăng nhập');
+      throw new HtmlError('máy chủ trả trang web thay vì file');
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    STATE.lastGoodUrl = url;
+    return bytes;
   }
 
   function sleepMs(ms) {
@@ -323,6 +385,197 @@
     }
   }
 
+  // ---- giữ phiên / phục hồi khi hết phiên ----------------------------------------
+  function sleepCancelable(ms) {
+    return new Promise((resolve) => {
+      let left = ms;
+      (function tick() {
+        if (STATE.stop || left <= 0) return resolve();
+        const step = Math.min(250, left);
+        left -= step;
+        setTimeout(tick, step);
+      })();
+    });
+  }
+
+  // Chạy mã trong thế giới của trang (content script không gọi được Liferay của trang).
+  function pageWorld(code) {
+    const el = document.createElement('script');
+    el.textContent = code;
+    document.documentElement.appendChild(el);
+    el.remove();
+  }
+
+  function sessionGuardOn() {
+    const ATTR = 'data-hatools-sess';
+    try {
+      pageWorld(
+        'try{var S=window.Liferay&&window.Liferay.Session,d=document.documentElement;' +
+          'if(S&&S.get&&S.set){window.__hatoolsSess={a:S.get("autoExtend"),r:S.get("redirectOnExpire")};' +
+          'S.set("autoExtend",true);S.set("redirectOnExpire",false);d.setAttribute("' + ATTR + '","ok");}' +
+          'else{d.setAttribute("' + ATTR + '","none");}}catch(e){document.documentElement.setAttribute("' + ATTR + '","err");}'
+      );
+      const v = document.documentElement.getAttribute(ATTR) || 'none';
+      document.documentElement.removeAttribute(ATTR);
+      return v;
+    } catch (e) {
+      return 'err';
+    }
+  }
+
+  function sessionGuardOff() {
+    try {
+      pageWorld(
+        'try{var S=window.Liferay&&window.Liferay.Session,o=window.__hatoolsSess;' +
+          'if(S&&o){S.set("autoExtend",o.a);S.set("redirectOnExpire",o.r);}window.__hatoolsSess=null;}catch(e){}'
+      );
+    } catch (e) {
+      /* bỏ qua */
+    }
+  }
+
+  // Gia hạn phiên như chính trang vẫn làm khi người dùng thao tác.
+  function keepAliveOnce() {
+    try {
+      pageWorld('try{var S=window.Liferay&&window.Liferay.Session;if(S&&S.extend)S.extend();}catch(e){}');
+    } catch (e) {
+      /* bỏ qua */
+    }
+    try {
+      fetch(location.origin + '/c/portal/extend_session', { credentials: 'same-origin', cache: 'no-store' }).catch(() => {});
+    } catch (e) {
+      /* bỏ qua */
+    }
+  }
+
+  // Thăm dò phiên còn hợp lệ không: ưu tiên tải lại file đã từng tải thành công (chỉ đọc phần đầu).
+  async function probeSession(ctx, filters) {
+    try {
+      if (STATE.lastGoodUrl) {
+        const ac = new AbortController();
+        const res = await fetch(STATE.lastGoodUrl, { credentials: 'same-origin', signal: ac.signal });
+        const type = (res.headers.get('content-type') || '').toLowerCase();
+        const good = res.ok && !type.includes('text/html') && !(res.redirected && isLoginUrl(res.url));
+        ac.abort();
+        return good;
+      }
+      await searchPage(ctx, filters, 1, 1);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Tạm dừng toàn bộ công việc, thăm dò định kỳ và tự chạy tiếp khi phiên hợp lệ trở lại.
+  function waitForSession(ctx, filters, why) {
+    if (!STATE.sessionWait) {
+      STATE.sessionWait = (async () => {
+        log(
+          `Phiên đăng nhập có vẻ đã hết hạn (${why}). Tạm dừng — hãy đăng nhập lại (ở tab khác hoặc ngay trang này); tool tự chạy tiếp khi phiên hợp lệ.`,
+          'warn'
+        );
+        progress({ text: 'Tạm dừng — chờ đăng nhập lại...' });
+        const t0 = Date.now();
+        while (!STATE.stop) {
+          await sleepCancelable(CFG.sessionPollMs);
+          if (STATE.stop) break;
+          if (await probeSession(ctx, filters)) {
+            log(`Phiên hợp lệ trở lại sau ${Math.round((Date.now() - t0) / 1000)} giây — tiếp tục.`, 'ok');
+            break;
+          }
+        }
+        STATE.sessionWait = null;
+      })();
+    }
+    return STATE.sessionWait;
+  }
+
+  // Chạy fn; nếu hết phiên thì chờ đăng nhập lại rồi chạy lại đúng việc đó. Với HtmlError (đã thử
+  // lại hết lượt): phiên hỏng thì chờ rồi làm lại; phiên vẫn tốt thì đó là lỗi riêng của file này.
+  async function guarded(fn, ctx, filters) {
+    let pauses = 0;
+    for (;;) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (STATE.stop) throw e;
+        let why = e && e.message;
+        if (e instanceof HtmlError) {
+          if (await probeSession(ctx, filters)) throw e;
+          why = 'file trả về trang web và phiên không còn hợp lệ';
+        } else if (!(e instanceof SessionError)) {
+          throw e;
+        }
+        // Đã chờ đăng nhập lại mà việc này vẫn lỗi phiên: coi là lỗi riêng, tránh tạm dừng lặp vô hạn.
+        if (pauses >= MAX_PAUSES_PER_JOB) throw new Error('vẫn lỗi phiên sau khi đã chờ đăng nhập lại (' + why + ')');
+        pauses++;
+        await waitForSession(ctx, filters, why);
+        if (STATE.stop) throw e;
+      }
+    }
+  }
+
+  // Thử lại có chờ với lỗi tạm thời (mạng, 5xx, 429). Mất mạng/chuyển hướng bất thường kéo dài
+  // được coi như hết phiên để tạm dừng chờ thay vì ghi lỗi hàng loạt.
+  async function withRetry(fn) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (e instanceof SessionError || STATE.stop) throw e;
+        const net = e instanceof TypeError;
+        const transient = net || e instanceof HtmlError || (e instanceof HttpError && (e.status >= 500 || e.status === 429));
+        if (!transient) throw e;
+        if (attempt >= RETRIES) {
+          if (net) throw new SessionError('mất kết nối hoặc bị chuyển hướng bất thường');
+          throw e;
+        }
+        await sleepCancelable(CFG.retryBaseMs * attempt);
+      }
+    }
+  }
+
+  // ---- lưu tiến độ để tiếp tục lần sau ---------------------------------------
+  function storageGet(key) {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(key, (o) => resolve((chrome.runtime.lastError ? {} : o) || {}));
+      } catch (e) {
+        resolve({});
+      }
+    });
+  }
+  function storageSet(obj) {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.set(obj, () => resolve(!chrome.runtime.lastError));
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+  async function loadDone(key) {
+    const all = (await storageGet(STORE_KEY))[STORE_KEY] || {};
+    const e = all[key];
+    return new Set(e && Array.isArray(e.keys) ? e.keys : []);
+  }
+  async function saveDone(key, set) {
+    const all = (await storageGet(STORE_KEY))[STORE_KEY] || {};
+    all[key] = { keys: Array.from(set), t: Date.now() };
+    Object.keys(all)
+      .sort((a, b) => all[b].t - all[a].t)
+      .slice(STORE_MAX_RUNS)
+      .forEach((k) => delete all[k]);
+    return storageSet({ [STORE_KEY]: all });
+  }
+  async function clearDone(key) {
+    const all = (await storageGet(STORE_KEY))[STORE_KEY] || {};
+    if (key in all) {
+      delete all[key];
+      await storageSet({ [STORE_KEY]: all });
+    }
+  }
+
   // ---- luồng chính ----------------------------------------------------------
   function validate(filters, term, ctx) {
     if (!ctx) return 'Không tìm thấy bảng hồ sơ đã số hóa trên trang này.';
@@ -335,16 +588,59 @@
 
   async function run(opts, ctx) {
     const delay = Math.max(0, Math.min(10000, (Number(opts.delaySec) || DEFAULT_DELAY_MS / 1000) * 1000));
+    const filters = opts.filters;
+    const term = String(opts.name || '').trim();
+    const key = runKey(filters, term);
+    const tag = new Date().toISOString().replace(/[-:]/g, '').replace('T', '_').slice(0, 15);
+
     setRunning(true);
     keepAwake(true);
     STATE.stop = false;
+    STATE.sessionWait = null;
+    STATE.lastGoodUrl = '';
     STATE.logs.length = 0;
     emit({ kind: 'clear' });
     progress({ phase: 'search', text: 'Đang tìm hồ sơ...', pct: 0, ok: 0, err: 0, total: 0 });
 
+    const guard = sessionGuardOn();
+    log(
+      guard === 'ok'
+        ? 'Giữ phiên: đã bật tự gia hạn phiên của trang và gia hạn định kỳ.'
+        : 'Giữ phiên: không thấy Liferay.Session trên trang — chỉ gia hạn định kỳ bằng request.',
+      'info'
+    );
+    keepAliveOnce();
+    const keepTimer = setInterval(() => {
+      if (!STATE.sessionWait) keepAliveOnce();
+    }, CFG.keepAliveMs);
+
+    const done = new Set(); // khóa các file đã được LƯU vào ZIP (đã giao cho trình duyệt)
+    let zip = new HaZipStore.ZipStore();
+    let pendingKeys = []; // file đã tải nhưng ZIP chứa chúng chưa được lưu
+    let partNo = 0;
+    let ok = 0;
+    let err = 0;
+    let total = 0;
+    let fatal = false;
+    let completed = false;
+
+    // Lưu phần ZIP hiện tại; chỉ sau khi lưu mới ghi nhận "đã xong" để lần sau không tải lại.
+    const flushZip = async (final) => {
+      if (!zip.count) return;
+      const z = zip;
+      const keys = pendingKeys;
+      zip = new HaZipStore.ZipStore();
+      pendingKeys = [];
+      const n = ++partNo;
+      const name = `TaiFileSoHoa_${tag}${final && n === 1 ? '' : '_p' + String(n).padStart(2, '0')}.zip`;
+      saveBlob(z.finish(), name);
+      keys.forEach((k) => done.add(k));
+      log(`Đã lưu ${name} (${z.count} file).`, 'ok');
+      if (!(await saveDone(key, done))) log('Cảnh báo: không ghi nhớ được tiến độ để tiếp tục lần sau.', 'warn');
+    };
+
     try {
-      const term = String(opts.name || '').trim();
-      const f = opts.filters;
+      const f = filters;
       log(
         `Bộ lọc trên trang: đơn vị="${f.unitLabel || 'tất cả'}", từ ${f.srtuNgay || '—'} đến ${f.srdenNgay || '—'}` +
           `${f.srmaFile ? ', mã file=' + f.srmaFile : ''}${f.srmaHoSo ? ', mã hồ sơ=' + f.srmaHoSo : ''}` +
@@ -356,62 +652,78 @@
       log(`Tìm thấy ${all.length} dòng, khớp tên file: ${rows.length}.`, rows.length ? 'ok' : 'warn');
       if (!rows.length) return;
 
-      const zips = [];
-      let zip = new HaZipStore.ZipStore();
+      if (opts.resume) (await loadDone(key)).forEach((k) => done.add(k));
+      else await clearDone(key);
+      const todo = rows.filter((r) => !done.has(rowKey(r)));
+      if (opts.resume && todo.length < rows.length) {
+        log(`Tiếp tục từ lần trước: bỏ qua ${rows.length - todo.length} file đã lưu, còn ${todo.length} file cần tải.`, 'info');
+      }
+      if (!todo.length) {
+        log('Tất cả file khớp đều đã được lưu ở lần trước. Bỏ chọn "Tiếp tục từ lần trước" nếu muốn tải lại.', 'ok');
+        progress({ phase: 'done', text: 'Xong: không còn file mới', pct: 100 });
+        return;
+      }
+      total = todo.length;
+
       const used = new Set();
-      let ok = 0;
-      let err = 0;
       let idx = 0;
+      progress({ phase: 'download', text: `Đang tải 0/${total}`, pct: 0, total });
 
-      progress({ phase: 'download', text: `Đang tải 0/${rows.length}`, pct: 0, total: rows.length });
-
+      const fetchRow = async (row) => {
+        const file = await resolveFile(row, ctx);
+        return { file, bytes: await downloadBytes(file.url) };
+      };
       const worker = async () => {
         while (!STATE.stop) {
           const i = idx++;
-          if (i >= rows.length) return;
-          const row = rows[i];
+          if (i >= todo.length) return;
+          const row = todo[i];
           const label = `${row.maHoSo} · ${row.maFile}`;
           try {
-            const f = await resolveFile(row, ctx);
-            const bytes = await downloadBytes(f.url);
-            const path = uniqueName(used, buildEntryName(row, f.name));
-            zip.add(path, bytes);
+            const { file, bytes } = await guarded(() => withRetry(() => fetchRow(row)), ctx, f);
+            zip.add(uniqueName(used, buildEntryName(row, file.name)), bytes);
+            pendingKeys.push(rowKey(row));
             ok++;
             log(`✓ ${label} (${Math.round(bytes.length / 1024)} KB)`, 'ok');
-            if (zip.size >= MAX_PART_BYTES || zip.count >= MAX_PART_FILES) {
-              zips.push(zip);
-              zip = new HaZipStore.ZipStore();
-            }
+            if (zip.size >= CFG.partBytes || zip.count >= CFG.partFiles) await flushZip(false);
           } catch (e) {
+            if (STATE.stop && (e instanceof SessionError || e instanceof HtmlError)) return; // dừng khi đang chờ phiên: file này chưa tải
             err++;
             log(`✗ ${label}: ${e && e.message ? e.message : e}`, 'err');
           }
-          const done = ok + err;
-          progress({ text: `Đang tải ${done}/${rows.length}`, pct: Math.round((done / rows.length) * 100), ok, err });
+          const n = ok + err;
+          progress({ text: `Đang tải ${n}/${total}`, pct: Math.round((n / total) * 100), ok, err });
           if (delay) await sleepMs(delay);
         }
       };
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, todo.length) }, worker));
 
-      if (zip.count) zips.push(zip);
-      if (STATE.stop) log('Đã dừng theo yêu cầu — đóng gói các file đã tải được.', 'warn');
-      if (!zips.length) {
-        log('Không có file nào tải được để đóng gói.', 'err');
-        return;
-      }
-      const tag = new Date().toISOString().replace(/[-:]/g, '').replace('T', '_').slice(0, 15);
-      for (let p = 0; p < zips.length; p++) {
-        const name = `TaiFileSoHoa_${tag}${zips.length > 1 ? '_p' + (p + 1) : ''}.zip`;
-        saveBlob(zips[p].finish(), name);
-        log(`Đã tạo ${name} (${zips[p].count} file).`, 'ok');
-        if (p < zips.length - 1) await sleepMs(800);
-      }
-      log(`Hoàn tất: ${ok} file thành công, ${err} lỗi.`, err ? 'warn' : 'ok');
-      progress({ phase: 'done', text: `Xong: ${ok} file · ${err} lỗi`, pct: 100, ok, err });
+      if (STATE.stop) log('Đã dừng theo yêu cầu — lưu các file đã tải được.', 'warn');
+      completed = !STATE.stop && err === 0;
     } catch (e) {
-      log('Lỗi: ' + (e && e.message ? e.message : e), 'err');
+      fatal = true;
+      if (STATE.stop && e instanceof SessionError) log('Đã dừng khi đang chờ đăng nhập lại.', 'warn');
+      else log('Lỗi: ' + (e && e.message ? e.message : e), 'err');
       progress({ phase: 'error', text: 'Có lỗi xảy ra — xem nhật ký.' });
     } finally {
+      // Luôn lưu phần đang dở (kể cả khi dừng/lỗi) để không mất những gì đã tải.
+      try {
+        await flushZip(true);
+        if (completed) {
+          await clearDone(key);
+          log('Hoàn tất toàn bộ — đã xóa trạng thái "tiếp tục".', 'info');
+        } else if (total && ok) {
+          log('Chưa hoàn tất — lần chạy sau (giữ chọn "Tiếp tục từ lần trước") sẽ bỏ qua các file đã lưu.', 'info');
+        }
+      } catch (e) {
+        log('Lỗi khi lưu ZIP: ' + (e && e.message ? e.message : e), 'err');
+      }
+      if (total && !fatal) {
+        log(`Kết thúc: ${ok} file thành công, ${err} lỗi.`, err ? 'warn' : 'ok');
+        progress({ phase: 'done', text: `Xong: ${ok} file · ${err} lỗi`, pct: STATE.stop ? STATE.prog.pct : 100, ok, err });
+      }
+      clearInterval(keepTimer);
+      sessionGuardOff();
       keepAwake(false);
       setRunning(false);
     }
@@ -424,7 +736,7 @@
     const filters = ctx ? readFilters(ctx) : null;
     const problem = validate(filters, term, ctx);
     if (problem) return { ok: false, error: problem };
-    run({ filters, name: term, delaySec: msg.delaySec }, ctx);
+    run({ filters, name: term, delaySec: msg.delaySec, resume: msg.resume !== false }, ctx);
     return { ok: true };
   }
 
@@ -457,6 +769,7 @@
     module.exports = {
       fold, matchName, sanitizeName, fileNameFromUrl, uniqueName, buildEntryName, parseRows,
       findFileUrl, buildUrl, getContext, readFilters, hasAnyFilter, validate,
+      CFG, isLoginUrl, isLoginHtml, runKey, rowKey,
     };
   }
 })();
