@@ -19,7 +19,7 @@ Mỗi khi có thay đổi/bản mới, thực hiện đúng thứ tự:
 - `sidepanel.html` / `sidepanel.js` — bảng điều khiển chính; `popup.html` / `popup.js` — menu mở trang.
 - `content.js` — số hóa, đính kèm, bổ sung kết quả, VBDLIS, trả kết quả (các chức năng cũ, không sửa nếu không cần).
 - `content-taisohoa.js` + `lib/zip-store.js` — chức năng **Tải File Số Hóa** (trang "Hồ sơ đã số hóa"). Đơn vị / từ ngày / đến ngày do người dùng chọn trực tiếp trên trang; content script đọc nguyên văn các ô lọc đó (không tự đoán định dạng ngày). Side panel có ô tên file, ô "Tiếp tục từ lần trước" và dòng trạng thái thư mục lưu.
-  - Lưu file: mặc định gói ZIP (tải qua trình duyệt); nếu người dùng bấm nút 📁 do extension chèn trên trang và chọn thư mục (File System Access API, tay cầm lưu trong IndexedDB của trang) thì ghi thẳng từng PDF vào `MãHồSơ/Chủ hồ sơ Mã định danh.PDF`, không bao giờ ghi đè file có sẵn.
+  - Lưu file: mặc định gói ZIP (tải qua trình duyệt); nếu người dùng bấm nút 📁 do extension chèn trên trang và chọn thư mục (File System Access API, tay cầm lưu trong IndexedDB của trang) thì ghi thẳng từng PDF vào thư mục đó. Tên file là `Chủ hồ sơ Mã định danh.PDF`, các file nằm phẳng (cả ZIP lẫn thư mục đều KHÔNG tạo thư mục con); trùng tên thì thêm ` (2)`; không bao giờ ghi đè file có sẵn.
   - `content-taisohoa-main.js` chạy ở `world: "MAIN"` chỉ để gọi `Liferay.Session` (giữ phiên); content script chính nhắn tin qua `window.postMessage`.
 - `tools/` — script ký số tự động và Apps Script.
 
