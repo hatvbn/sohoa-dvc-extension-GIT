@@ -107,20 +107,18 @@
     }
   }
 
-  // Quy tắc đặt tên: "Chủ hồ sơ Mã định danh.<đuôi gốc>", nằm trong thư mục theo mã hồ sơ.
-  // Thiếu cả chủ hồ sơ lẫn số định danh thì dùng mã file để không bị trùng/trống tên.
-  function entryDir(row) {
-    return sanitizeName(row.maHoSo, 80);
-  }
+  // Quy tắc đặt tên: "Chủ hồ sơ Mã định danh.<đuôi gốc>", các file nằm phẳng (không tạo thư mục con).
+  // Trùng tên (cùng người, nhiều giấy tờ) thì thêm " (2)", " (3)". Thiếu cả chủ hồ sơ lẫn số
+  // định danh thì dùng mã file để không bị trùng/trống tên.
   function entryStem(row) {
     const base = [row.chuHoSo, row.soDinhDanh].filter(Boolean).join(' ') || row.maFile;
-    return sanitizeName(base, 120);
+    return sanitizeName(base, 150);
   }
   function extOf(srcName) {
     return (String(srcName || '').match(/\.[A-Za-z0-9]{1,6}$/) || ['.pdf'])[0];
   }
   function buildEntryName(row, srcName) {
-    return `${entryDir(row)}/${entryStem(row)}${extOf(srcName)}`;
+    return entryStem(row) + extOf(srcName);
   }
 
   function isLoginUrl(u) {
@@ -579,7 +577,8 @@
   }
 
   // ---- lưu thẳng vào thư mục người dùng chọn (File System Access API) ------------
-  const stemCache = new Map(); // tên thư mục con -> tập "tên không đuôi" (chữ thường) đã có trên đĩa
+  const stemCache = new Map(); // khóa -> Promise<tập "tên không đuôi" (chữ thường) đã có trong thư mục>
+  const ROOT_KEY = 'root';
 
   function stemOf(name) {
     return String(name).replace(/\.[A-Za-z0-9]{1,6}$/, '').toLowerCase();
@@ -587,41 +586,36 @@
 
   // Mọi luồng song song dùng CHUNG một lần liệt kê (cache Promise) để cùng thấy các tên đã giữ chỗ;
   // nếu mỗi luồng tự liệt kê riêng thì sẽ chọn trùng tên và ghi đè lên nhau.
-  function listStems(root, sub) {
-    if (!stemCache.has(sub)) {
+  function listStems(root) {
+    if (!stemCache.has(ROOT_KEY)) {
       stemCache.set(
-        sub,
+        ROOT_KEY,
         (async () => {
           const set = new Set();
           try {
-            const d = await root.getDirectoryHandle(sub);
-            for await (const [name, h] of d.entries()) if (h.kind === 'file') set.add(stemOf(name));
+            for await (const [name, h] of root.entries()) if (h.kind === 'file') set.add(stemOf(name));
           } catch (e) {
-            if (!e || e.name !== 'NotFoundError') {
-              stemCache.delete(sub);
-              throw e;
-            }
+            stemCache.delete(ROOT_KEY);
+            throw e;
           }
           return set;
         })()
       );
     }
-    return stemCache.get(sub);
+    return stemCache.get(ROOT_KEY);
   }
 
-  // Ghi một file vào <root>/<mã hồ sơ>/. KHÔNG bao giờ ghi đè file đã có: trùng tên thì thêm " (2)", " (3)"...
+  // Ghi một file thẳng vào thư mục đã chọn (không tạo thư mục con). KHÔNG bao giờ ghi đè file đã có:
+  // trùng tên thì thêm " (2)", " (3)"...
   async function writeToFolder(root, row, srcName, bytes) {
-    const sub = entryDir(row);
-    const stems = await listStems(root, sub);
+    const stems = await listStems(root);
     const base = entryStem(row);
     let stem = base;
     for (let n = 2; stems.has(stem.toLowerCase()); n++) stem = `${base} (${n})`;
     stems.add(stem.toLowerCase()); // giữ chỗ ngay (đồng bộ) để các luồng song song không chọn trùng tên
     const name = stem + extOf(srcName);
-    let dir = null;
     try {
-      dir = await root.getDirectoryHandle(sub, { create: true });
-      const fh = await dir.getFileHandle(name, { create: true });
+      const fh = await root.getFileHandle(name, { create: true });
       const w = await fh.createWritable(); // ghi vào file tạm, chỉ thay thế khi close() -> không để file dở
       try {
         await w.write(bytes);
@@ -637,16 +631,14 @@
     } catch (e) {
       stems.delete(stem.toLowerCase());
       // getFileHandle(create) đã tạo sẵn file rỗng trên đĩa: dọn đi để không để lại file 0 byte.
-      if (dir) {
-        try {
-          await dir.removeEntry(name);
-        } catch (e2) {
-          /* bỏ qua */
-        }
+      try {
+        await root.removeEntry(name);
+      } catch (e2) {
+        /* bỏ qua */
       }
       throw e;
     }
-    return sub + '/' + name;
+    return name;
   }
 
   // Lỗi ghi khiến không nên đi tiếp (mất quyền, hết dung lượng...), khác với lỗi riêng của một file.
@@ -1074,7 +1066,7 @@
       fold, matchName, sanitizeName, fileNameFromUrl, uniqueName, buildEntryName, parseRows,
       findFileUrl, buildUrl, getContext, readFilters, hasAnyFilter, validate,
       CFG, isLoginUrl, isLoginHtml, runKey, rowKey,
-      entryDir, entryStem, writeToFolder, listStems, stemCache, idbGet, idbSet, isFatalFsError,
+      entryStem, writeToFolder, listStems, stemCache, idbGet, idbSet, isFatalFsError,
     };
   }
 })();
