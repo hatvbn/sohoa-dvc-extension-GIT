@@ -1,7 +1,7 @@
 // Chức năng "Tải File Số Hóa": lấy đúng bộ lọc người dùng đã chọn ngay trên trang "Hồ sơ đã số
 // hóa" (đơn vị, từ ngày, đến ngày...), lọc thêm theo tên file nhập ở side panel rồi tải toàn bộ
 // file PDF gộp vào ZIP. Dùng phiên đăng nhập sẵn có (fetch cùng origin). Điều khiển từ side
-// panel qua ns 'sp'.
+// panel qua ns 'sp'. Lưu: ZIP (mặc định) hoặc ghi thẳng từng PDF vào thư mục người dùng chọn.
 (function () {
   'use strict';
 
@@ -41,6 +41,8 @@
     stop: false,
     logs: [],
     prog: { phase: '', text: '', pct: 0, ok: 0, err: 0, total: 0 },
+    dir: null, // { handle, name } thư mục lưu đã chọn (null = lưu ZIP)
+    dirNote: '',
     sessionWait: null, // Promise khi đang tạm dừng chờ đăng nhập lại
     lastGoodUrl: '', // URL file đã tải thành công gần nhất, dùng để thăm dò phiên
   };
@@ -107,10 +109,18 @@
 
   // Quy tắc đặt tên: "Chủ hồ sơ Mã định danh.<đuôi gốc>", nằm trong thư mục theo mã hồ sơ.
   // Thiếu cả chủ hồ sơ lẫn số định danh thì dùng mã file để không bị trùng/trống tên.
-  function buildEntryName(row, srcName) {
-    const ext = (String(srcName || '').match(/\.[A-Za-z0-9]{1,6}$/) || ['.pdf'])[0];
+  function entryDir(row) {
+    return sanitizeName(row.maHoSo, 80);
+  }
+  function entryStem(row) {
     const base = [row.chuHoSo, row.soDinhDanh].filter(Boolean).join(' ') || row.maFile;
-    return `${sanitizeName(row.maHoSo, 80)}/${sanitizeName(base, 120)}${ext}`;
+    return sanitizeName(base, 120);
+  }
+  function extOf(srcName) {
+    return (String(srcName || '').match(/\.[A-Za-z0-9]{1,6}$/) || ['.pdf'])[0];
+  }
+  function buildEntryName(row, srcName) {
+    return `${entryDir(row)}/${entryStem(row)}${extOf(srcName)}`;
   }
 
   function isLoginUrl(u) {
@@ -217,6 +227,7 @@
   }
   function setRunning(v) {
     STATE.running = v;
+    if (typeof renderDirButton === 'function') renderDirButton().catch(() => {});
     emit({ kind: 'dl-running', running: v });
   }
 
@@ -398,49 +409,40 @@
     });
   }
 
-  // Chạy mã trong thế giới của trang (content script không gọi được Liferay của trang).
-  function pageWorld(code) {
-    const el = document.createElement('script');
-    el.textContent = code;
-    document.documentElement.appendChild(el);
-    el.remove();
+  // Gọi sang content script chạy ở world MAIN (content-taisohoa-main.js) để dùng Liferay.Session của trang.
+  // Trả 'ok' | 'none' (trang không có Liferay.Session hoặc script MAIN chưa có) | 'err'.
+  let mainSeq = 0;
+  function callMain(cmd) {
+    return new Promise((resolve) => {
+      const id = 'hs' + ++mainSeq + '-' + Date.now();
+      const onMsg = (ev) => {
+        const d = ev.data;
+        if (ev.origin !== location.origin || !d || d.hatools !== 'res' || d.id !== id) return;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMsg);
+        resolve(d.res);
+      };
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', onMsg);
+        resolve('none');
+      }, 1500);
+      window.addEventListener('message', onMsg);
+      try {
+        window.postMessage({ hatools: 'cmd', id, cmd }, location.origin);
+      } catch (e) {
+        clearTimeout(timer);
+        window.removeEventListener('message', onMsg);
+        resolve('err');
+      }
+    });
   }
 
-  function sessionGuardOn() {
-    const ATTR = 'data-hatools-sess';
-    try {
-      pageWorld(
-        'try{var S=window.Liferay&&window.Liferay.Session,d=document.documentElement;' +
-          'if(S&&S.get&&S.set){window.__hatoolsSess={a:S.get("autoExtend"),r:S.get("redirectOnExpire")};' +
-          'S.set("autoExtend",true);S.set("redirectOnExpire",false);d.setAttribute("' + ATTR + '","ok");}' +
-          'else{d.setAttribute("' + ATTR + '","none");}}catch(e){document.documentElement.setAttribute("' + ATTR + '","err");}'
-      );
-      const v = document.documentElement.getAttribute(ATTR) || 'none';
-      document.documentElement.removeAttribute(ATTR);
-      return v;
-    } catch (e) {
-      return 'err';
-    }
-  }
-
-  function sessionGuardOff() {
-    try {
-      pageWorld(
-        'try{var S=window.Liferay&&window.Liferay.Session,o=window.__hatoolsSess;' +
-          'if(S&&o){S.set("autoExtend",o.a);S.set("redirectOnExpire",o.r);}window.__hatoolsSess=null;}catch(e){}'
-      );
-    } catch (e) {
-      /* bỏ qua */
-    }
-  }
+  const sessionGuardOn = () => callMain('on');
+  const sessionGuardOff = () => callMain('off');
 
   // Gia hạn phiên như chính trang vẫn làm khi người dùng thao tác.
   function keepAliveOnce() {
-    try {
-      pageWorld('try{var S=window.Liferay&&window.Liferay.Session;if(S&&S.extend)S.extend();}catch(e){}');
-    } catch (e) {
-      /* bỏ qua */
-    }
+    callMain('extend');
     try {
       fetch(location.origin + '/c/portal/extend_session', { credentials: 'same-origin', cache: 'no-store' }).catch(() => {});
     } catch (e) {
@@ -576,6 +578,262 @@
     }
   }
 
+  // ---- lưu thẳng vào thư mục người dùng chọn (File System Access API) ------------
+  const stemCache = new Map(); // tên thư mục con -> tập "tên không đuôi" (chữ thường) đã có trên đĩa
+
+  function stemOf(name) {
+    return String(name).replace(/\.[A-Za-z0-9]{1,6}$/, '').toLowerCase();
+  }
+
+  // Mọi luồng song song dùng CHUNG một lần liệt kê (cache Promise) để cùng thấy các tên đã giữ chỗ;
+  // nếu mỗi luồng tự liệt kê riêng thì sẽ chọn trùng tên và ghi đè lên nhau.
+  function listStems(root, sub) {
+    if (!stemCache.has(sub)) {
+      stemCache.set(
+        sub,
+        (async () => {
+          const set = new Set();
+          try {
+            const d = await root.getDirectoryHandle(sub);
+            for await (const [name, h] of d.entries()) if (h.kind === 'file') set.add(stemOf(name));
+          } catch (e) {
+            if (!e || e.name !== 'NotFoundError') {
+              stemCache.delete(sub);
+              throw e;
+            }
+          }
+          return set;
+        })()
+      );
+    }
+    return stemCache.get(sub);
+  }
+
+  // Ghi một file vào <root>/<mã hồ sơ>/. KHÔNG bao giờ ghi đè file đã có: trùng tên thì thêm " (2)", " (3)"...
+  async function writeToFolder(root, row, srcName, bytes) {
+    const sub = entryDir(row);
+    const stems = await listStems(root, sub);
+    const base = entryStem(row);
+    let stem = base;
+    for (let n = 2; stems.has(stem.toLowerCase()); n++) stem = `${base} (${n})`;
+    stems.add(stem.toLowerCase()); // giữ chỗ ngay (đồng bộ) để các luồng song song không chọn trùng tên
+    const name = stem + extOf(srcName);
+    let dir = null;
+    try {
+      dir = await root.getDirectoryHandle(sub, { create: true });
+      const fh = await dir.getFileHandle(name, { create: true });
+      const w = await fh.createWritable(); // ghi vào file tạm, chỉ thay thế khi close() -> không để file dở
+      try {
+        await w.write(bytes);
+        await w.close();
+      } catch (e) {
+        try {
+          await w.abort();
+        } catch (e2) {
+          /* bỏ qua */
+        }
+        throw e;
+      }
+    } catch (e) {
+      stems.delete(stem.toLowerCase());
+      // getFileHandle(create) đã tạo sẵn file rỗng trên đĩa: dọn đi để không để lại file 0 byte.
+      if (dir) {
+        try {
+          await dir.removeEntry(name);
+        } catch (e2) {
+          /* bỏ qua */
+        }
+      }
+      throw e;
+    }
+    return sub + '/' + name;
+  }
+
+  // Lỗi ghi khiến không nên đi tiếp (mất quyền, hết dung lượng...), khác với lỗi riêng của một file.
+  function isFatalFsError(e) {
+    return !!e && ['NotAllowedError', 'SecurityError', 'QuotaExceededError', 'InvalidStateError', 'NoModificationAllowedError'].includes(e.name);
+  }
+
+  // Lưu tay cầm thư mục trong IndexedDB của trang để lần sau không phải chọn lại.
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      if (typeof indexedDB === 'undefined') return reject(new Error('no indexedDB'));
+      const r = indexedDB.open('hatools_taisohoa', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  }
+  async function idbGet(k) {
+    try {
+      const db = await idbOpen();
+      return await new Promise((res, rej) => {
+        const q = db.transaction('kv').objectStore('kv').get(k);
+        q.onsuccess = () => res(q.result);
+        q.onerror = () => rej(q.error);
+      });
+    } catch (e) {
+      return undefined;
+    }
+  }
+  async function idbSet(k, v) {
+    try {
+      const db = await idbOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(v, k);
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  async function idbDel(k) {
+    try {
+      const db = await idbOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').delete(k);
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+    } catch (e) {
+      /* bỏ qua */
+    }
+  }
+
+  async function dirPerm() {
+    if (!STATE.dir) return 'none';
+    try {
+      return await STATE.dir.handle.queryPermission({ mode: 'readwrite' });
+    } catch (e) {
+      return 'prompt';
+    }
+  }
+  async function dirInfo() {
+    return {
+      state: STATE.dir ? await dirPerm() : 'none', // none | granted | prompt | denied
+      name: STATE.dir ? STATE.dir.name : '',
+      supported: typeof window.showDirectoryPicker === 'function',
+      note: STATE.dirNote,
+    };
+  }
+
+  async function verifyWritable(h) {
+    const fh = await h.getFileHandle('.hatools-write-test', { create: true });
+    const w = await fh.createWritable();
+    await w.write(new Uint8Array([1]));
+    await w.close();
+    await h.removeEntry('.hatools-write-test');
+  }
+
+  // Nút trên trang: Chrome chỉ cho mở hộp thoại chọn thư mục khi người dùng bấm ngay trên trang.
+  function ensureDirButton() {
+    if (typeof document === 'undefined' || !document.body) return null;
+    let box = document.getElementById('hatools-dir-box');
+    if (box) return box;
+    box = document.createElement('div');
+    box.id = 'hatools-dir-box';
+    box.style.cssText =
+      'position:fixed;right:16px;bottom:16px;z-index:2147483000;display:flex;gap:6px;align-items:stretch;' +
+      'font:600 12.5px/1.25 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;';
+    const b = document.createElement('button');
+    b.id = 'hatools-dir-btn';
+    b.type = 'button';
+    b.style.cssText =
+      'border:none;border-radius:8px;padding:9px 12px;color:#fff;background:#4f46e5;cursor:pointer;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,.35);max-width:320px;text-align:left;font:inherit;';
+    const x = document.createElement('button');
+    x.id = 'hatools-dir-x';
+    x.type = 'button';
+    x.textContent = '×';
+    x.title = 'Bỏ chọn thư mục (quay lại lưu ZIP)';
+    x.style.cssText = 'border:none;border-radius:8px;padding:0 10px;color:#fff;background:#6b7280;cursor:pointer;font:inherit;font-size:16px;';
+    b.addEventListener('click', onDirButton);
+    x.addEventListener('click', forgetDir);
+    box.appendChild(b);
+    box.appendChild(x);
+    document.body.appendChild(box);
+    return box;
+  }
+
+  async function renderDirButton() {
+    const box = ensureDirButton();
+    const info = await dirInfo();
+    if (box) {
+      const b = box.querySelector('#hatools-dir-btn');
+      const x = box.querySelector('#hatools-dir-x');
+      box.style.display = info.supported ? 'flex' : 'none';
+      if (info.state === 'none') {
+        b.textContent = '📁 Chọn thư mục lưu file';
+        b.style.background = '#4f46e5';
+      } else if (info.state === 'granted') {
+        b.textContent = `📁 Lưu vào: ${info.name} (bấm để đổi)`;
+        b.style.background = '#16a34a';
+      } else {
+        b.textContent = `📁 Cấp lại quyền cho: ${info.name}`;
+        b.style.background = '#d97706';
+      }
+      x.style.display = info.state === 'none' ? 'none' : '';
+      b.disabled = x.disabled = STATE.running;
+      b.style.opacity = x.style.opacity = STATE.running ? '0.6' : '1';
+    }
+    emit({ kind: 'dl-dir', dir: info });
+  }
+
+  async function onDirButton() {
+    if (STATE.running) return;
+    STATE.dirNote = '';
+    try {
+      if (STATE.dir && (await dirPerm()) !== 'granted') {
+        if ((await STATE.dir.handle.requestPermission({ mode: 'readwrite' })) === 'granted') {
+          await renderDirButton();
+          return;
+        }
+      }
+      const h = await window.showDirectoryPicker({ id: 'hatools-taisohoa', mode: 'readwrite' });
+      await verifyWritable(h);
+      STATE.dir = { handle: h, name: h.name };
+      stemCache.clear();
+      await idbSet('dir', h);
+    } catch (e) {
+      if (e && e.name !== 'AbortError') {
+        STATE.dirNote =
+          'Không dùng được thư mục này (' + (e.message || e.name) + '). Hãy chọn một thư mục con — Chrome không cho chọn trực tiếp Downloads/Documents/Desktop.';
+      }
+    }
+    await renderDirButton();
+  }
+
+  async function forgetDir() {
+    if (STATE.running) return;
+    STATE.dir = null;
+    STATE.dirNote = '';
+    stemCache.clear();
+    await idbDel('dir');
+    await renderDirButton();
+  }
+
+  async function initDir() {
+    const h = await idbGet('dir');
+    if (h && h.kind === 'directory') STATE.dir = { handle: h, name: h.name };
+    await renderDirButton();
+  }
+
+  function focusDirButton() {
+    const b = typeof document !== 'undefined' && document.getElementById('hatools-dir-btn');
+    if (!b) return false;
+    try {
+      if (b.scrollIntoView) b.scrollIntoView({ block: 'nearest' });
+      if (b.animate) b.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.15)' }, { transform: 'scale(1)' }], { duration: 450, iterations: 4 });
+    } catch (e) {
+      /* bỏ qua */
+    }
+    return true;
+  }
+
   // ---- luồng chính ----------------------------------------------------------
   function validate(filters, term, ctx) {
     if (!ctx) return 'Không tìm thấy bảng hồ sơ đã số hóa trên trang này.';
@@ -602,7 +860,7 @@
     emit({ kind: 'clear' });
     progress({ phase: 'search', text: 'Đang tìm hồ sơ...', pct: 0, ok: 0, err: 0, total: 0 });
 
-    const guard = sessionGuardOn();
+    const guard = await sessionGuardOn();
     log(
       guard === 'ok'
         ? 'Giữ phiên: đã bật tự gia hạn phiên của trang và gia hạn định kỳ.'
@@ -614,7 +872,11 @@
       if (!STATE.sessionWait) keepAliveOnce();
     }, CFG.keepAliveMs);
 
-    const done = new Set(); // khóa các file đã được LƯU vào ZIP (đã giao cho trình duyệt)
+    const folder = opts.dir ? opts.dir.handle : null;
+    stemCache.clear();
+    let fsFatal = null;
+    let sinceSave = 0;
+    const done = new Set(); // khóa các file đã được LƯU (vào ZIP đã giao cho trình duyệt, hoặc vào thư mục)
     let zip = new HaZipStore.ZipStore();
     let pendingKeys = []; // file đã tải nhưng ZIP chứa chúng chưa được lưu
     let partNo = 0;
@@ -641,6 +903,12 @@
 
     try {
       const f = filters;
+      log(
+        folder
+          ? `Lưu trực tiếp vào thư mục «${opts.dir.name}» (không nén ZIP, không ghi đè file đã có).`
+          : 'Chưa chọn thư mục — lưu thành ZIP vào thư mục Downloads của Chrome.',
+        'info'
+      );
       log(
         `Bộ lọc trên trang: đơn vị="${f.unitLabel || 'tất cả'}", từ ${f.srtuNgay || '—'} đến ${f.srdenNgay || '—'}` +
           `${f.srmaFile ? ', mã file=' + f.srmaFile : ''}${f.srmaHoSo ? ', mã hồ sơ=' + f.srmaHoSo : ''}` +
@@ -681,13 +949,30 @@
           const label = `${row.maHoSo} · ${row.maFile}`;
           try {
             const { file, bytes } = await guarded(() => withRetry(() => fetchRow(row)), ctx, f);
-            zip.add(uniqueName(used, buildEntryName(row, file.name)), bytes);
-            pendingKeys.push(rowKey(row));
-            ok++;
-            log(`✓ ${label} (${Math.round(bytes.length / 1024)} KB)`, 'ok');
-            if (zip.size >= CFG.partBytes || zip.count >= CFG.partFiles) await flushZip(false);
+            if (folder) {
+              const where = await writeToFolder(folder, row, file.name, bytes);
+              done.add(rowKey(row));
+              ok++;
+              log(`✓ ${where} (${Math.round(bytes.length / 1024)} KB)`, 'ok');
+              if (++sinceSave >= 10) {
+                sinceSave = 0;
+                await saveDone(key, done);
+              }
+            } else {
+              zip.add(uniqueName(used, buildEntryName(row, file.name)), bytes);
+              pendingKeys.push(rowKey(row));
+              ok++;
+              log(`✓ ${label} (${Math.round(bytes.length / 1024)} KB)`, 'ok');
+              if (zip.size >= CFG.partBytes || zip.count >= CFG.partFiles) await flushZip(false);
+            }
           } catch (e) {
             if (STATE.stop && (e instanceof SessionError || e instanceof HtmlError)) return; // dừng khi đang chờ phiên: file này chưa tải
+            if (folder && isFatalFsError(e)) {
+              fsFatal = e;
+              STATE.stop = true;
+              log(`✗ Không ghi được vào thư mục (${e.name}: ${e.message || ''}) — dừng. Kiểm tra quyền ghi và dung lượng ổ đĩa.`, 'err');
+              return;
+            }
             err++;
             log(`✗ ${label}: ${e && e.message ? e.message : e}`, 'err');
           }
@@ -699,7 +984,7 @@
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, todo.length) }, worker));
 
       if (STATE.stop) log('Đã dừng theo yêu cầu — lưu các file đã tải được.', 'warn');
-      completed = !STATE.stop && err === 0;
+      completed = !STATE.stop && err === 0 && !fsFatal;
     } catch (e) {
       fatal = true;
       if (STATE.stop && e instanceof SessionError) log('Đã dừng khi đang chờ đăng nhập lại.', 'warn');
@@ -709,6 +994,7 @@
       // Luôn lưu phần đang dở (kể cả khi dừng/lỗi) để không mất những gì đã tải.
       try {
         await flushZip(true);
+        if (folder && !completed && done.size) await saveDone(key, done);
         if (completed) {
           await clearDone(key);
           log('Hoàn tất toàn bộ — đã xóa trạng thái "tiếp tục".', 'info');
@@ -719,33 +1005,46 @@
         log('Lỗi khi lưu ZIP: ' + (e && e.message ? e.message : e), 'err');
       }
       if (total && !fatal) {
-        log(`Kết thúc: ${ok} file thành công, ${err} lỗi.`, err ? 'warn' : 'ok');
+        log(`Kết thúc: ${ok} file thành công, ${err} lỗi${fsFatal ? ' (dừng do lỗi ghi thư mục)' : ''}.`, err || fsFatal ? 'warn' : 'ok');
         progress({ phase: 'done', text: `Xong: ${ok} file · ${err} lỗi`, pct: STATE.stop ? STATE.prog.pct : 100, ok, err });
       }
       clearInterval(keepTimer);
-      sessionGuardOff();
+      await sessionGuardOff();
       keepAwake(false);
       setRunning(false);
     }
   }
 
-  function start(msg) {
+  async function start(msg) {
     if (STATE.running) return { ok: false, error: 'Đang chạy, hãy dừng hoặc chờ hoàn tất.' };
     const ctx = getContext();
     const term = String(msg.name || '');
     const filters = ctx ? readFilters(ctx) : null;
     const problem = validate(filters, term, ctx);
     if (problem) return { ok: false, error: problem };
-    run({ filters, name: term, delaySec: msg.delaySec, resume: msg.resume !== false }, ctx);
+    let dir = null;
+    if (STATE.dir) {
+      if ((await dirPerm()) !== 'granted') {
+        renderDirButton().catch(() => {}); // cập nhật nút theo quyền thực tế
+        return {
+          ok: false,
+          error: `Đã chọn thư mục «${STATE.dir.name}» nhưng cần cấp lại quyền ghi: bấm nút 📁 màu cam ở góc dưới bên phải trang (hoặc bấm × để quay lại lưu ZIP).`,
+        };
+      }
+      dir = STATE.dir;
+    }
+    run({ filters, name: term, delaySec: msg.delaySec, resume: msg.resume !== false, dir }, ctx);
     return { ok: true };
   }
 
-  function hello() {
+  async function hello() {
     const ctx = getContext();
+    await renderDirButton().catch(() => {}); // làm mới nút theo quyền thực tế (Chrome có thể đã thu hồi)
     return {
       custom: 'taisohoa',
       taskTitle: 'Tải File Số Hóa',
       ready: !!ctx,
+      dir: await dirInfo(),
       state: Object.assign({ running: STATE.running }, STATE.prog),
       logs: STATE.logs,
     };
@@ -754,15 +1053,20 @@
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!msg || msg.ns !== 'sp') return false;
-      if (msg.cmd === 'hello') sendResponse(hello());
-      else if (msg.cmd === 'dl-start') sendResponse(start(msg));
+      if (msg.cmd === 'hello') hello().then(sendResponse);
+      else if (msg.cmd === 'dl-start') start(msg).then(sendResponse);
       else if (msg.cmd === 'dl-stop') {
         STATE.stop = true;
         sendResponse({ ok: true });
+        return false;
+      } else if (msg.cmd === 'dir-focus') {
+        sendResponse({ ok: focusDirButton() });
+        return false;
       } else return false;
-      return false;
+      return true; // trả lời bất đồng bộ
     });
   }
+  if (typeof document !== 'undefined') initDir();
 
   // Xuất hàm thuần để kiểm thử bằng Node (không ảnh hưởng khi chạy trong trình duyệt).
   if (typeof module !== 'undefined' && module.exports) {
@@ -770,6 +1074,7 @@
       fold, matchName, sanitizeName, fileNameFromUrl, uniqueName, buildEntryName, parseRows,
       findFileUrl, buildUrl, getContext, readFilters, hasAnyFilter, validate,
       CFG, isLoginUrl, isLoginHtml, runKey, rowKey,
+      entryDir, entryStem, writeToFolder, listStems, stemCache, idbGet, idbSet, isFatalFsError,
     };
   }
 })();
